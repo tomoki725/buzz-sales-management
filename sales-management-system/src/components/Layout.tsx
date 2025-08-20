@@ -32,7 +32,7 @@ const Layout = () => {
     <div className="layout">
       <header className="header">
         <div className="header-content">
-          <h1 className="logo">営業管理システム</h1>
+          <h1 className="logo">BuzzSalesMgr</h1>
           <nav className="nav">
             <button 
               className="menu-toggle"
@@ -54,7 +54,7 @@ const Layout = () => {
               ))}
             </ul>
           </nav>
-          <button onClick={handleLogout} className="btn btn-secondary">
+          <button onClick={handleLogout} className="btn btn-secondary" style={{ whiteSpace: 'nowrap' }}>
             ログアウト
           </button>
         </div>
@@ -79,7 +79,7 @@ const Layout = () => {
         }
         
         .header-content {
-          max-width: 1200px;
+          max-width: 1400px;
           margin: 0 auto;
           display: flex;
           justify-content: space-between;
@@ -88,9 +88,10 @@ const Layout = () => {
         }
         
         .logo {
-          font-size: 1.5rem;
+          font-size: 1.3rem;
           font-weight: bold;
           margin: 0;
+          white-space: nowrap;
         }
         
         .nav {
@@ -113,15 +114,16 @@ const Layout = () => {
           list-style: none;
           margin: 0;
           padding: 0;
-          gap: 20px;
+          gap: 15px;
         }
         
         .nav-link {
           color: white;
           text-decoration: none;
-          padding: 10px 15px;
+          padding: 10px 12px;
           border-radius: 4px;
           transition: background-color 0.3s;
+          white-space: nowrap;
         }
         
         .nav-link:hover {
@@ -131,6 +133,8 @@ const Layout = () => {
         .main-content {
           flex: 1;
           padding: 20px 0;
+          background-color: #f5f5f5;
+          min-height: calc(100vh - 64px);
         }
         
         @media (max-width: 768px) {

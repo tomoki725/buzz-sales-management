@@ -11,7 +11,8 @@ const KPIManagement = () => {
     newDeals: Array(12).fill(0),
     newOrders: Array(12).fill(0),
     existingDeals: Array(12).fill(0),
-    existingOrders: Array(12).fill(0)
+    existingOrders: Array(12).fill(0),
+    grossProfitBudget: Array(12).fill(0)
   });
 
   const months = [
@@ -57,7 +58,8 @@ const KPIManagement = () => {
         newDeals: Array(12).fill(0),
         newOrders: Array(12).fill(0),
         existingDeals: Array(12).fill(0),
-        existingOrders: Array(12).fill(0)
+        existingOrders: Array(12).fill(0),
+        grossProfitBudget: Array(12).fill(0)
       };
       
       const currentYear = new Date().getFullYear();
@@ -68,6 +70,7 @@ const KPIManagement = () => {
           newTargets.newOrders[index] = target.newOrders;
           newTargets.existingDeals[index] = target.existingDeals;
           newTargets.existingOrders[index] = target.existingOrders;
+          newTargets.grossProfitBudget[index] = target.grossProfitBudget || 0;
         }
       });
       
@@ -96,7 +99,8 @@ const KPIManagement = () => {
           newDeals: targets.newDeals[index],
           newOrders: targets.newOrders[index],
           existingDeals: targets.existingDeals[index],
-          existingOrders: targets.existingOrders[index]
+          existingOrders: targets.existingOrders[index],
+          grossProfitBudget: targets.grossProfitBudget[index]
         };
         
         // 既存のターゲットを検索
@@ -206,6 +210,24 @@ const KPIManagement = () => {
                       value={targets.existingOrders[index]}
                       onChange={(e) => handleTargetChange('existingOrders', index, e.target.value)}
                       min="0"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="target-category">
+              <h3>粗利BGT（円）</h3>
+              <div className="month-grid">
+                {months.map((month, index) => (
+                  <div key={index} className="month-input">
+                    <label>{month}</label>
+                    <input
+                      type="number"
+                      value={targets.grossProfitBudget[index]}
+                      onChange={(e) => handleTargetChange('grossProfitBudget', index, e.target.value)}
+                      min="0"
+                      placeholder="0"
                     />
                   </div>
                 ))}

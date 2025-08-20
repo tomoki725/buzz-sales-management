@@ -33,7 +33,8 @@ const ActionLogRecord = () => {
     minutes: '',
     nextAction: '',
     status: '',
-    summary: ''
+    summary: '',
+    performanceType: 'unselected' as 'unselected' | 'new' | 'existing'
   });
 
   useEffect(() => {
@@ -110,6 +111,7 @@ const ActionLogRecord = () => {
         nextAction: formData.nextAction,
         status: formData.status,
         summary: formData.summary,
+        performanceType: formData.performanceType,
         createdAt: new Date()
       });
       
@@ -247,6 +249,20 @@ const ActionLogRecord = () => {
                 <option value="lost">失注</option>
                 <option value="active">稼働中</option>
                 <option value="completed">稼働終了</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="performanceType">実績</label>
+              <select
+                id="performanceType"
+                name="performanceType"
+                value={formData.performanceType}
+                onChange={handleInputChange}
+              >
+                <option value="unselected">未選択</option>
+                <option value="new">新規</option>
+                <option value="existing">既存</option>
               </select>
             </div>
           </div>

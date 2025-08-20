@@ -14,6 +14,7 @@ export interface SalesTarget {
   existingDeals: number;
   newOrders: number;
   existingOrders: number;
+  grossProfitBudget?: number;
 }
 
 export interface ProposalMenu {
@@ -54,6 +55,7 @@ export interface ActionLog {
   nextAction: string;
   status: string;
   summary?: string;
+  performanceType?: 'unselected' | 'new' | 'existing';
   createdAt: Date;
 }
 

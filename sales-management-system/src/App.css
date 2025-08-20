@@ -18,9 +18,13 @@ body {
 }
 
 .container {
-  max-width: 1200px;
+  width: 100%;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 20px 40px;
+  background-color: white;
+  min-height: calc(100vh - 104px);
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.05);
 }
 
 .card {
