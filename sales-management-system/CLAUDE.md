@@ -29,18 +29,28 @@ React + TypeScript + Firebase を使用した営業管理システムです。
   - 部署別統計情報の表示（実装予定）
 
 ### 2. 案件管理
-- **案件一覧**
-  - 案件の一覧表示
+- **案件単位タブ**
+  - 案件の一覧表示（テーブル形式）
   - ステータス・担当者フィルタリング機能
-  - 詳細・編集ボタン（モーダル対応）
+  - 詳細・編集・追加・削除ボタン（モーダル対応）
+  - 実績（performanceType）表示：未選択/新規/既存の色分け表示
 
-- **顧客一覧**
-  - 顧客情報の表示・管理
+- **クライアント単位タブ（アコーディオン機能）**
+  - **コンパクト表示**: クライアント名のみを初期表示で垂直スペースを節約
+  - **アコーディオン展開**: クライアント名クリックで詳細なプロジェクト一覧を表示
+  - **クライアントヘッダー**: 
+    - クライアント名と案件数（例：株式会社A (3案件)）
+    - 最新案件の担当者・ステータス・最終接触日
+    - 展開/折りたたみアイコン（▼/▶）
+  - **展開時プロジェクト詳細**:
+    - 商材名、提案メニュー、担当者、ステータス、実績、最終接触日
+    - 各プロジェクトの詳細・編集・追加・削除ボタン
+    - 新規追加ボタン（クライアント単位）
 
 - **モーダル機能**
   - 案件詳細表示
   - 案件編集機能
-  - 実績（performanceType）表示：未選択/新規/既存の色分け表示
+  - 共通のモーダルが両タブで使用可能
 
 ### 3. ログ記録
 - アクションログの記録機能
@@ -71,8 +81,20 @@ React + TypeScript + Firebase を使用した営業管理システムです。
     - **粗利BGT（円）**: 月別の粗利バジェット設定
 
 ### 8. 実績入力
-- 月別実績データの入力
-- 売上・コスト・粗利の記録
+- **CSVインポート機能**
+  - CSVファイルアップロード（担当者名、年月、クライアント名、案件名、実績）
+  - 既存データ全削除→新規データ一括登録方式
+  - 重複データの自動集約処理
+  - インポート結果詳細表示（成功・失敗・削除件数）
+  - 担当者マスタとの連携チェック
+
+- **実績データ表示**
+  - **クライアント別整理**: 合計金額順でクライアントをソート
+  - **静的展開表示**: 全クライアントの全プロジェクトを常時表示
+  - **プロジェクト詳細**: 年月、案件名、担当者、金額をテーブル表示
+  - **合計金額表示**: クライアント別の粗利合計
+  - **レスポンシブ対応**: モバイル向け表示調整
+  - ※現在アコーディオン機能なし（将来的な改善予定）
 
 ### 9. 提案メニューマスタ
 - 提案メニューの管理
@@ -131,6 +153,56 @@ interface Performance {
   grossProfit: number;
   createdAt: Date;
 }
+
+// 案件管理のアコーディオン機能用の拡張データ構造
+interface EnrichedClient {
+  ...Client; // 基本クライアント情報
+  projects: EnrichedProject[]; // 詳細情報付きプロジェクト配列
+  projectCount: number;
+  latestStatus: string;
+  lastContactDate: Date | null;
+  assigneeName: string;
+}
+
+interface EnrichedProject {
+  ...Project; // 基本プロジェクト情報
+  userName: string; // 担当者名（IDから解決済み）
+  proposalMenuName: string; // 提案メニュー名（IDから解決済み）
+  performanceType?: 'unselected' | 'new' | 'existing'; // 実績タイプ
+}
+```
+
+### アコーディオン機能技術実装
+```typescript
+// 状態管理
+const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
+
+// 展開・折りたたみ制御
+const toggleClientExpansion = (clientId: string) => {
+  setExpandedClients(prev => {
+    const newSet = new Set(prev);
+    if (newSet.has(clientId)) {
+      newSet.delete(clientId);
+    } else {
+      newSet.add(clientId);
+    }
+    return newSet;
+  });
+};
+
+// データ取得とエンリッチメント
+const groupedClients = clients.map(client => {
+  const clientProjects = projects.filter(p => p.clientName === client.name);
+  const enrichedProjects = clientProjects.map(project => ({
+    ...project,
+    userName: users.find(u => u.id === project.assigneeId)?.name || '-',
+    proposalMenuName: proposalMenus.find(menu => menu.id === project.proposalMenuId)?.name || '-',
+    performanceType: actionLogs
+      .filter(log => log.projectId === project.id)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]?.performanceType
+  }));
+  // ... その他のクライアント情報処理
+});
 ```
 
 ## デプロイメント
@@ -151,6 +223,19 @@ interface Performance {
   - カード形式のUI
   - グリッドレイアウトによるKPI表示
 
+- **アコーディオンデザイン**:
+  - **インタラクティブヘッダー**: クリック可能なクライアントヘッダー
+  - **ビジュアルフィードバック**: ホバー時の背景色変化とシャドウ効果
+  - **展開アニメーション**: slideDown CSS アニメーション（0.3s ease-out）
+  - **チェブロンアイコン**: ▼/▶ アイコンの回転アニメーション（0.2s ease-in-out）
+  - **階層表示**: ヘッダー（グレー背景）→コンテンツ（白背景）の視覚的階層
+  - **レスポンシブ対応**: モバイルでの縦積み表示とフォントサイズ調整
+
+- **カラーシステム**:
+  - **ステータスバッジ**: 提案中（青）、交渉中（オレンジ）、受注（緑）、失注（赤）、稼働中（紫）、稼働終了（グレー）
+  - **実績バッジ**: 新規（緑）、既存（青）、未選択（オレンジ）、データなし（グレー）
+  - **アコーディオン**: ヘッダー（#f8f9fa）、ホバー（#f0f1f2）、ボーダー（#e0e0e0）
+
 - **グラフ・チャート**:
   - 月別粗利推移（売上表示は削除済み）
   - クライアント別YOY比較
@@ -167,6 +252,7 @@ interface Performance {
 8. **KPI管理機能拡張**: 粗利BGT月別入力機能追加
 9. **売上表示削除**: グラフとKPIから売上項目を削除、粗利中心の表示に変更
 10. **全体目標設定機能追加**: ダッシュボード全体タブにポップアップモーダル形式の目標設定機能
+11. **案件管理アコーディオン機能追加**: クライアント単位タブにアコーディオン式展開表示を実装、垂直スペースを大幅削減
 
 ## 今後の拡張予定
 - 部署別統計機能の実装
@@ -175,4 +261,4 @@ interface Performance {
 - 通知・アラート機能
 
 ---
-*最終更新日: 2025年8月20日*
+*最終更新日: 2025年8月21日*

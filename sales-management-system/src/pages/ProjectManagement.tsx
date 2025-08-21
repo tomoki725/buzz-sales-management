@@ -22,6 +22,7 @@ const ProjectManagement = () => {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
   
   // モーダル関連の状態
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -116,6 +117,18 @@ const ProjectManagement = () => {
     setShowDetailModal(true);
   };
 
+  const toggleClientExpansion = (clientId: string) => {
+    setExpandedClients(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(clientId)) {
+        newSet.delete(clientId);
+      } else {
+        newSet.add(clientId);
+      }
+      return newSet;
+    });
+  };
+
   const filteredProjects = projects.filter(project => {
     if (statusFilter && project.status !== statusFilter) return false;
     if (assigneeFilter && project.assigneeId !== assigneeFilter) return false;
@@ -127,8 +140,26 @@ const ProjectManagement = () => {
     const latestProject = clientProjects.sort((a, b) => 
       (b.lastContactDate?.getTime() || 0) - (a.lastContactDate?.getTime() || 0)
     )[0];
+    
+    // プロジェクトに詳細情報を追加
+    const enrichedProjects = clientProjects.map(project => {
+      const user = users.find(u => u.id === project.assigneeId);
+      const proposalMenu = proposalMenus.find(menu => menu.id === project.proposalMenuId);
+      const latestActionLog = actionLogs
+        .filter(log => log.projectId === project.id)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+      
+      return {
+        ...project,
+        userName: user?.name || '-',
+        proposalMenuName: proposalMenu?.name || '-',
+        performanceType: latestActionLog?.performanceType
+      };
+    });
+    
     return {
       ...client,
+      projects: enrichedProjects,
       projectCount: clientProjects.length,
       latestStatus: latestProject?.status || '',
       lastContactDate: latestProject?.lastContactDate || null,
@@ -288,63 +319,149 @@ const ProjectManagement = () => {
 
       {activeTab === 'client' && (
         <div className="card">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>クライアント名</th>
-                <th>担当者</th>
-                <th>ステータス</th>
-                <th>最終接触日</th>
-                <th>アクション</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: '40px' }}>
-                    読み込み中...
-                  </td>
-                </tr>
-              ) : groupedClients.length === 0 ? (
-                <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: '40px' }}>
-                    クライアントがありません
-                  </td>
-                </tr>
-              ) : (
-                groupedClients.map((client) => (
-                  <tr key={client.id}>
-                    <td>{client.name}</td>
-                    <td>{client.assigneeName || '-'}</td>
-                    <td>
-                      <span className={`status status-${client.latestStatus}`}>
-                        {client.latestStatus === 'proposal' && '提案中'}
-                        {client.latestStatus === 'negotiation' && '交渉中'}
-                        {client.latestStatus === 'won' && '受注'}
-                        {client.latestStatus === 'lost' && '失注'}
-                        {client.latestStatus === 'active' && '稼働中'}
-                        {client.latestStatus === 'completed' && '稼働終了'}
-                        {!client.latestStatus && '-'}
-                      </span>
-                    </td>
-                    <td>{client.lastContactDate?.toLocaleDateString() || '-'}</td>
-                    <td>
-                      <button 
-                        className="btn btn-sm"
-                        onClick={() => {
-                          navigate('/action-log/record', {
-                            state: { clientName: client.name }
-                          });
-                        }}
-                      >
-                        追加
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '40px' }}>
+              読み込み中...
+            </div>
+          ) : groupedClients.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px' }}>
+              クライアントがありません
+            </div>
+          ) : (
+            <div className="client-accordion">
+              {groupedClients.map((client) => {
+                const isExpanded = expandedClients.has(client.id);
+                return (
+                  <div key={client.id} className="accordion-item">
+                    <div 
+                      className="accordion-header"
+                      onClick={() => toggleClientExpansion(client.id)}
+                    >
+                      <div className="client-summary">
+                        <div className="client-info">
+                          <span className="client-name">{client.name}</span>
+                          <span className="project-count">({client.projectCount}案件)</span>
+                        </div>
+                        <div className="client-meta">
+                          <span className="assignee">{client.assigneeName || '-'}</span>
+                          <span className={`status status-${client.latestStatus}`}>
+                            {client.latestStatus === 'proposal' && '提案中'}
+                            {client.latestStatus === 'negotiation' && '交渉中'}
+                            {client.latestStatus === 'won' && '受注'}
+                            {client.latestStatus === 'lost' && '失注'}
+                            {client.latestStatus === 'active' && '稼働中'}
+                            {client.latestStatus === 'completed' && '稼働終了'}
+                            {!client.latestStatus && '-'}
+                          </span>
+                          <span className="last-contact">
+                            {client.lastContactDate?.toLocaleDateString() || '-'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="expand-icon">
+                        <span className={`chevron ${isExpanded ? 'expanded' : ''}`}>▼</span>
+                      </div>
+                    </div>
+                    
+                    {isExpanded && (
+                      <div className="accordion-content">
+                        <div className="project-header">
+                          <button 
+                            className="btn btn-sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate('/action-log/record', {
+                                state: { clientName: client.name }
+                              });
+                            }}
+                          >
+                            + 新規追加
+                          </button>
+                        </div>
+                        
+                        {client.projects && client.projects.length > 0 ? (
+                          <table className="project-table">
+                            <thead>
+                              <tr>
+                                <th>商材名</th>
+                                <th>提案メニュー</th>
+                                <th>担当者</th>
+                                <th>ステータス</th>
+                                <th>実績</th>
+                                <th>最終接触日</th>
+                                <th>アクション</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {client.projects.map((project) => (
+                                <tr key={project.id}>
+                                  <td>{project.productName}</td>
+                                  <td>{project.proposalMenuName}</td>
+                                  <td>{project.userName}</td>
+                                  <td>
+                                    <span className={`status status-${project.status}`}>
+                                      {project.status === 'proposal' && '提案中'}
+                                      {project.status === 'negotiation' && '交渉中'}
+                                      {project.status === 'won' && '受注'}
+                                      {project.status === 'lost' && '失注'}
+                                      {project.status === 'active' && '稼働中'}
+                                      {project.status === 'completed' && '稼働終了'}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <span className={`performance performance-${project.performanceType || 'none'}`}>
+                                      {project.performanceType === 'new' && '新規'}
+                                      {project.performanceType === 'existing' && '既存'}
+                                      {project.performanceType === 'unselected' && '未選択'}
+                                      {!project.performanceType && '-'}
+                                    </span>
+                                  </td>
+                                  <td>{project.lastContactDate?.toLocaleDateString() || '-'}</td>
+                                  <td>
+                                    <button 
+                                      className="btn btn-sm btn-secondary"
+                                      onClick={() => handleViewDetails(project)}
+                                      style={{ marginRight: '5px' }}
+                                    >
+                                      詳細
+                                    </button>
+                                    <button 
+                                      className="btn btn-sm btn-secondary"
+                                      onClick={() => handleEditProject(project)}
+                                      style={{ marginRight: '5px' }}
+                                    >
+                                      編集
+                                    </button>
+                                    <button 
+                                      className="btn btn-sm"
+                                      onClick={() => handleAddLog(project)}
+                                      style={{ marginRight: '5px' }}
+                                    >
+                                      追加
+                                    </button>
+                                    <button 
+                                      className="btn btn-sm btn-danger"
+                                      onClick={() => handleDeleteProject(project.id)}
+                                    >
+                                      削除
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <div className="no-projects">
+                            このクライアントにはプロジェクトがありません
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -688,6 +805,157 @@ const ProjectManagement = () => {
           border-top: 1px solid #eee;
         }
         
+        /* アコーディオンスタイル */
+        .client-accordion {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        
+        .accordion-item {
+          border: 1px solid #e0e0e0;
+          border-radius: 8px;
+          overflow: hidden;
+          transition: all 0.2s ease-in-out;
+        }
+        
+        .accordion-item:hover {
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .accordion-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 16px 20px;
+          background-color: #f8f9fa;
+          cursor: pointer;
+          transition: background-color 0.2s ease-in-out;
+          border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .accordion-header:hover {
+          background-color: #f0f1f2;
+        }
+        
+        .client-summary {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          width: 100%;
+        }
+        
+        .client-info {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        
+        .client-name {
+          font-weight: 600;
+          font-size: 16px;
+          color: #333;
+        }
+        
+        .project-count {
+          font-size: 14px;
+          color: #666;
+          background-color: #e3f2fd;
+          padding: 2px 8px;
+          border-radius: 12px;
+        }
+        
+        .client-meta {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+        
+        .assignee {
+          font-size: 14px;
+          color: #555;
+          min-width: 80px;
+        }
+        
+        .last-contact {
+          font-size: 14px;
+          color: #555;
+          min-width: 100px;
+        }
+        
+        .expand-icon {
+          margin-left: 16px;
+        }
+        
+        .chevron {
+          font-size: 14px;
+          color: #666;
+          transition: transform 0.2s ease-in-out;
+        }
+        
+        .chevron.expanded {
+          transform: rotate(180deg);
+        }
+        
+        .accordion-content {
+          padding: 20px;
+          background-color: white;
+          border-top: 1px solid #e0e0e0;
+          animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            max-height: 0;
+            padding: 0 20px;
+          }
+          to {
+            opacity: 1;
+            max-height: 1000px;
+            padding: 20px;
+          }
+        }
+        
+        .project-header {
+          display: flex;
+          justify-content: flex-end;
+          margin-bottom: 16px;
+          padding-bottom: 16px;
+          border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .project-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-top: 8px;
+        }
+        
+        .project-table th,
+        .project-table td {
+          padding: 10px;
+          text-align: left;
+          border-bottom: 1px solid #f0f0f0;
+          font-size: 14px;
+        }
+        
+        .project-table th {
+          background-color: #f8f9fa;
+          font-weight: 600;
+          color: #555;
+        }
+        
+        .project-table tbody tr:hover {
+          background-color: #f9f9f9;
+        }
+        
+        .no-projects {
+          text-align: center;
+          padding: 40px;
+          color: #666;
+          font-style: italic;
+        }
+
         @media (max-width: 768px) {
           .detail-grid {
             grid-template-columns: 1fr;
@@ -696,6 +964,26 @@ const ProjectManagement = () => {
           .modal-content {
             width: 95%;
             margin: 10px;
+          }
+          
+          .client-summary {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 12px;
+          }
+          
+          .client-meta {
+            gap: 12px;
+            flex-wrap: wrap;
+          }
+          
+          .project-table {
+            font-size: 12px;
+          }
+          
+          .project-table th,
+          .project-table td {
+            padding: 8px;
           }
         }
       `}</style>
