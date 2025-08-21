@@ -76,6 +76,7 @@ export interface Order {
 
 export interface Performance {
   id: string;
+  assigneeId: string;
   clientName: string;
   projectName: string;
   recordingMonth: string;
@@ -83,4 +84,14 @@ export interface Performance {
   cost: number;
   grossProfit: number;
   createdAt: Date;
+}
+
+export interface FreeWriting {
+  id: string;
+  userId: string; // 'overall' for 全体タブ, user ID for 個人タブ
+  type: 'monthly' | 'weekly';
+  period: string; // 月次: '2025-08', 週次: '2025-W32'
+  content: string;
+  createdAt: Date;
+  updatedAt: Date;
 }

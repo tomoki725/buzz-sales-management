@@ -19,7 +19,8 @@ import type {
   Project, 
   ActionLog, 
   Order, 
-  Performance 
+  Performance,
+  FreeWriting
 } from '../types';
 
 // Users Collection
@@ -261,5 +262,74 @@ export const getPerformance = async (): Promise<Performance[]> => {
       ...data,
       createdAt: data.createdAt.toDate()
     } as Performance;
+  });
+};
+
+export const deletePerformance = async (id: string) => {
+  const docRef = doc(db, 'performance', id);
+  await deleteDoc(docRef);
+};
+
+export const deleteAllPerformance = async (): Promise<number> => {
+  const snapshot = await getDocs(performanceCollection);
+  const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+  await Promise.all(deletePromises);
+  return snapshot.docs.length;
+};
+
+// FreeWriting Collection
+export const freeWritingCollection = collection(db, 'freeWriting');
+
+export const getFreeWriting = async (userId: string, type: 'monthly' | 'weekly', period: string): Promise<FreeWriting | null> => {
+  const q = query(
+    freeWritingCollection,
+    where('userId', '==', userId),
+    where('type', '==', type),
+    where('period', '==', period)
+  );
+  const snapshot = await getDocs(q);
+  
+  if (snapshot.empty) {
+    return null;
+  }
+  
+  const doc = snapshot.docs[0];
+  const data = doc.data();
+  return {
+    id: doc.id,
+    ...data,
+    createdAt: data.createdAt.toDate(),
+    updatedAt: data.updatedAt.toDate()
+  } as FreeWriting;
+};
+
+export const saveFreeWriting = async (freeWritingData: Omit<FreeWriting, 'id'>) => {
+  // 既存のドキュメントを確認
+  const existing = await getFreeWriting(freeWritingData.userId, freeWritingData.type, freeWritingData.period);
+  
+  if (existing) {
+    // 更新
+    const docRef = doc(db, 'freeWriting', existing.id);
+    await updateDoc(docRef, {
+      content: freeWritingData.content,
+      updatedAt: Timestamp.fromDate(new Date())
+    });
+    return existing.id;
+  } else {
+    // 新規作成
+    const docRef = await addDoc(freeWritingCollection, {
+      ...freeWritingData,
+      createdAt: Timestamp.fromDate(freeWritingData.createdAt),
+      updatedAt: Timestamp.fromDate(freeWritingData.updatedAt)
+    });
+    return docRef.id;
+  }
+};
+
+export const updateFreeWriting = async (id: string, content: string) => {
+  const docRef = doc(db, 'freeWriting', id);
+  await updateDoc(docRef, {
+    content,
+    updatedAt: Timestamp.fromDate(new Date())
   });
 };
