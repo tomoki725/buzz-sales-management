@@ -21,11 +21,15 @@ const OrderManagement = () => {
 
   const loadData = async () => {
     try {
+      console.log('=== 受注管理データ読み込み開始 ===');
       const [ordersData, usersData, menusData] = await Promise.all([
         getOrders(),
         getUsers(),
         getProposalMenus()
       ]);
+      console.log('取得した受注データ:', ordersData);
+      console.log('受注データ件数:', ordersData.length);
+      
       setOrders(ordersData);
       setUsers(usersData);
       setProposalMenus(menusData);
@@ -36,6 +40,7 @@ const OrderManagement = () => {
         monthValues[order.id] = order.implementationMonth || '';
       });
       setEditMonth(monthValues);
+      console.log('=== 受注管理データ読み込み完了 ===');
     } catch (error) {
       console.error('Error loading data:', error);
     }
@@ -77,6 +82,11 @@ const OrderManagement = () => {
         <div className="stat-card">
           <h3>受注件数</h3>
           <div className="stat-value">{orders.length}件</div>
+          {orders.length === 0 && (
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+              コンソールでデバッグログを確認してください
+            </div>
+          )}
         </div>
       </div>
 

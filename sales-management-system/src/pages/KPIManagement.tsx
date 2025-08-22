@@ -8,11 +8,11 @@ const KPIManagement = () => {
   const [existingTargets, setExistingTargets] = useState<SalesTarget[]>([]);
   const [loading, setLoading] = useState(false);
   const [targets, setTargets] = useState({
-    newDeals: Array(12).fill(0),
-    newOrders: Array(12).fill(0),
-    existingDeals: Array(12).fill(0),
-    existingOrders: Array(12).fill(0),
-    grossProfitBudget: Array(12).fill(0)
+    newDeals: Array(12).fill(''),
+    newOrders: Array(12).fill(''),
+    existingDeals: Array(12).fill(''),
+    existingOrders: Array(12).fill(''),
+    grossProfitBudget: Array(12).fill('')
   });
 
   const months = [
@@ -21,10 +21,12 @@ const KPIManagement = () => {
   ];
 
   const handleTargetChange = (type: string, monthIndex: number, value: string) => {
+    // 空文字の場合は空文字のまま、それ以外はparseIntまたは元の値を保持
+    const numValue = value === '' ? '' : (parseInt(value) || '');
     setTargets(prev => ({
       ...prev,
-      [type]: prev[type as keyof typeof prev].map((val: number, index: number) => 
-        index === monthIndex ? parseInt(value) || 0 : val
+      [type]: prev[type as keyof typeof prev].map((val: any, index: number) => 
+        index === monthIndex ? numValue : val
       )
     }));
   };
@@ -55,22 +57,23 @@ const KPIManagement = () => {
       
       // 既存の目標を読み込み
       const newTargets = {
-        newDeals: Array(12).fill(0),
-        newOrders: Array(12).fill(0),
-        existingDeals: Array(12).fill(0),
-        existingOrders: Array(12).fill(0),
-        grossProfitBudget: Array(12).fill(0)
+        newDeals: Array(12).fill(''),
+        newOrders: Array(12).fill(''),
+        existingDeals: Array(12).fill(''),
+        existingOrders: Array(12).fill(''),
+        grossProfitBudget: Array(12).fill('')
       };
       
       const currentYear = new Date().getFullYear();
       targetsData.forEach(target => {
         if (target.year === currentYear && target.month >= 1 && target.month <= 12) {
           const index = target.month - 1;
-          newTargets.newDeals[index] = target.newDeals;
-          newTargets.newOrders[index] = target.newOrders;
-          newTargets.existingDeals[index] = target.existingDeals;
-          newTargets.existingOrders[index] = target.existingOrders;
-          newTargets.grossProfitBudget[index] = target.grossProfitBudget || 0;
+          // 0の場合は空文字、それ以外は数値をそのまま設定
+          newTargets.newDeals[index] = target.newDeals || '';
+          newTargets.newOrders[index] = target.newOrders || '';
+          newTargets.existingDeals[index] = target.existingDeals || '';
+          newTargets.existingOrders[index] = target.existingOrders || '';
+          newTargets.grossProfitBudget[index] = target.grossProfitBudget || '';
         }
       });
       
@@ -96,11 +99,11 @@ const KPIManagement = () => {
           userId: selectedUser,
           year: currentYear,
           month,
-          newDeals: targets.newDeals[index],
-          newOrders: targets.newOrders[index],
-          existingDeals: targets.existingDeals[index],
-          existingOrders: targets.existingOrders[index],
-          grossProfitBudget: targets.grossProfitBudget[index]
+          newDeals: Number(targets.newDeals[index]) || 0,
+          newOrders: Number(targets.newOrders[index]) || 0,
+          existingDeals: Number(targets.existingDeals[index]) || 0,
+          existingOrders: Number(targets.existingOrders[index]) || 0,
+          grossProfitBudget: Number(targets.grossProfitBudget[index]) || 0
         };
         
         // 既存のターゲットを検索

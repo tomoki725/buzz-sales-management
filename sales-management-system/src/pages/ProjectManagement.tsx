@@ -7,7 +7,9 @@ import {
   deleteProject,
   getActionLogs,
   getProposalMenus,
-  updateProject
+  updateProject,
+  createOrder,
+  getOrders
 } from '../services/firestore';
 import type { Project, Client, User, ActionLog, ProposalMenu } from '../types';
 
@@ -28,7 +30,9 @@ const ProjectManagement = () => {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [editFormData, setEditFormData] = useState<Partial<Project>>({});
+  const [editFormData, setEditFormData] = useState<Partial<Omit<Project, 'lastContactDate'>> & { lastContactDate?: string }>({});
+  const [editProposalMenus, setEditProposalMenus] = useState<string[]>([]);
+  const [isEditDropdownOpen, setIsEditDropdownOpen] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -48,10 +52,74 @@ const ProjectManagement = () => {
       setUsers(usersData);
       setActionLogs(actionLogsData);
       setProposalMenus(proposalMenusData);
+      
+      // 既存の受注ステータス案件を受注管理に同期
+      await syncExistingWonProjects(projectsData, proposalMenusData);
     } catch (error) {
       console.error('Error loading data:', error);
     }
     setLoading(false);
+  };
+  
+  const syncExistingWonProjects = async (projectsData: Project[], proposalMenusData: ProposalMenu[]) => {
+    try {
+      console.log('=== 既存受注案件の同期開始 ===');
+      const wonProjects = projectsData.filter(p => p.status === 'won');
+      const existingOrders = await getOrders();
+      
+      console.log('受注ステータス案件数:', wonProjects.length);
+      console.log('既存受注データ数:', existingOrders.length);
+      
+      for (const project of wonProjects) {
+        console.log('受注案件チェック中:', { 
+          id: project.id, 
+          clientName: project.clientName, 
+          title: project.title,
+          status: project.status
+        });
+        
+        const hasOrder = existingOrders.some(order => order.projectId === project.id);
+        console.log('既存受注データ:', hasOrder ? 'あり' : 'なし');
+        
+        if (!hasOrder) {
+          console.log('受注データが不足している案件を発見:', project.clientName, '-', project.title);
+          
+          // 提案メニュー名を取得
+          const proposalMenuNames = project.proposalMenuIds 
+            ? project.proposalMenuIds
+                .map((id: string) => proposalMenusData.find(menu => menu.id === id)?.name)
+                .filter(Boolean)
+                .join(', ')
+            : proposalMenusData.find(menu => menu.id === project.proposalMenuId)?.name || '';
+          
+          console.log('提案メニュー名:', proposalMenuNames);
+          
+          // 受注データを作成
+          const orderData: any = {
+            projectId: project.id,
+            clientId: project.clientId,
+            clientName: project.clientName,
+            projectTitle: project.title || project.productName || 'タイトル未設定',
+            assigneeId: project.assigneeId,
+            orderDate: new Date(),
+            proposalMenu: proposalMenuNames
+            // implementationMonth, revenue, cost, grossProfit は undefined なので省略
+          };
+          
+          console.log('作成する受注データ:', orderData);
+          
+          try {
+            await createOrder(orderData);
+            console.log('既存案件の受注データを作成しました:', project.clientName, '-', project.title);
+          } catch (error) {
+            console.error('受注データ作成エラー:', error);
+          }
+        }
+      }
+      console.log('=== 既存受注案件の同期完了 ===');
+    } catch (error) {
+      console.error('既存受注案件の同期エラー:', error);
+    }
   };
 
   const handleNewProject = () => {
@@ -73,20 +141,94 @@ const ProjectManagement = () => {
 
   const handleEditProject = (project: Project) => {
     setSelectedProject(project);
-    setEditFormData(project);
+    setEditFormData({
+      ...project,
+      lastContactDate: project.lastContactDate ? project.lastContactDate.toISOString().split('T')[0] : ''
+    });
+    // 複数の提案メニューIDを設定
+    setEditProposalMenus(project.proposalMenuIds || (project.proposalMenuId ? [project.proposalMenuId] : []));
     setShowEditModal(true);
+  };
+
+  const toggleEditProposalMenu = (menuId: string) => {
+    setEditProposalMenus(prev => 
+      prev.includes(menuId)
+        ? prev.filter((id: string) => id !== menuId)
+        : [...prev, menuId]
+    );
+  };
+
+  const getEditSelectedMenuNames = () => {
+    return proposalMenus
+      .filter((menu: ProposalMenu) => editProposalMenus.includes(menu.id))
+      .map((menu: ProposalMenu) => menu.name)
+      .join(', ');
+  };
+
+  const createOrderIfNotExists = async (project: Project, updatedData: any) => {
+    try {
+      // 既存の受注データをチェック
+      const existingOrders = await getOrders();
+      const existingOrder = existingOrders.find(order => order.projectId === project.id);
+      
+      if (existingOrder) {
+        console.log('受注データは既に存在します:', existingOrder.id);
+        return;
+      }
+
+      // 受注データを作成
+      const proposalMenuNames = project.proposalMenuIds 
+        ? project.proposalMenuIds
+            .map((id: string) => proposalMenus.find(menu => menu.id === id)?.name)
+            .filter(Boolean)
+            .join(', ')
+        : proposalMenus.find(menu => menu.id === project.proposalMenuId)?.name || '';
+      
+      const orderData: any = {
+        projectId: project.id,
+        clientId: project.clientId,
+        clientName: project.clientName,
+        projectTitle: updatedData.title || project.title || project.productName || 'タイトル未設定',
+        assigneeId: project.assigneeId,
+        orderDate: new Date(),
+        proposalMenu: proposalMenuNames
+        // implementationMonth, revenue, cost, grossProfit は undefined なので省略
+      };
+
+      console.log('作成する受注データ:', orderData);
+      await createOrder(orderData);
+      console.log('受注データを自動作成しました:', project.clientName, '-', orderData.projectTitle);
+    } catch (error) {
+      console.error('受注データ作成エラー:', error);
+      // エラーが発生してもプロジェクト更新は成功として処理を続行
+    }
   };
 
   const handleSaveProject = async () => {
     if (!selectedProject) return;
     
     try {
-      await updateProject(selectedProject.id, {
+      const updatedData = {
         title: editFormData.title || selectedProject.title,
+        clientName: editFormData.clientName || selectedProject.clientName,
         productName: editFormData.productName || selectedProject.productName,
+        proposalMenuId: editProposalMenus[0] || selectedProject.proposalMenuId, // 後方互換性
+        proposalMenuIds: editProposalMenus,
+        assigneeId: editFormData.assigneeId || selectedProject.assigneeId,
         status: editFormData.status || selectedProject.status,
-      });
+        lastContactDate: editFormData.lastContactDate ? new Date(editFormData.lastContactDate) : selectedProject.lastContactDate,
+      };
+
+      await updateProject(selectedProject.id, updatedData);
+
+      // ステータスが'won'（受注）に変更された場合、受注データを自動作成
+      if (updatedData.status === 'won' && selectedProject.status !== 'won') {
+        await createOrderIfNotExists(selectedProject, updatedData);
+      }
+
       setShowEditModal(false);
+      setEditProposalMenus([]);
+      setIsEditDropdownOpen(false);
       loadData();
     } catch (error) {
       console.error('Error updating project:', error);
@@ -99,6 +241,8 @@ const ProjectManagement = () => {
     setShowEditModal(false);
     setSelectedProject(null);
     setEditFormData({});
+    setEditProposalMenus([]);
+    setIsEditDropdownOpen(false);
   };
 
   const handleDeleteProject = async (id: string) => {
@@ -144,7 +288,14 @@ const ProjectManagement = () => {
     // プロジェクトに詳細情報を追加
     const enrichedProjects = clientProjects.map(project => {
       const user = users.find(u => u.id === project.assigneeId);
-      const proposalMenu = proposalMenus.find(menu => menu.id === project.proposalMenuId);
+      // 複数の提案メニュー名を取得
+      const proposalMenuNames = project.proposalMenuIds 
+        ? project.proposalMenuIds
+            .map(id => proposalMenus.find(menu => menu.id === id)?.name)
+            .filter(Boolean)
+            .join(', ')
+        : proposalMenus.find(menu => menu.id === project.proposalMenuId)?.name || '-';
+      
       const latestActionLog = actionLogs
         .filter(log => log.projectId === project.id)
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
@@ -152,7 +303,7 @@ const ProjectManagement = () => {
       return {
         ...project,
         userName: user?.name || '-',
-        proposalMenuName: proposalMenu?.name || '-',
+        proposalMenuName: proposalMenuNames,
         performanceType: latestActionLog?.performanceType
       };
     });
@@ -247,7 +398,12 @@ const ProjectManagement = () => {
               ) : (
                 filteredProjects.map((project) => {
                   const user = users.find(u => u.id === project.assigneeId);
-                  const proposalMenu = proposalMenus.find(menu => menu.id === project.proposalMenuId);
+                  const proposalMenuNames = project.proposalMenuIds 
+                    ? project.proposalMenuIds
+                        .map(id => proposalMenus.find(menu => menu.id === id)?.name)
+                        .filter(Boolean)
+                        .join(', ')
+                    : proposalMenus.find(menu => menu.id === project.proposalMenuId)?.name || '-';
                   
                   const latestActionLog = actionLogs
                     .filter(log => log.projectId === project.id)
@@ -257,7 +413,7 @@ const ProjectManagement = () => {
                   return (
                     <tr key={project.id}>
                       <td>{project.productName}</td>
-                      <td>{proposalMenu?.name || '-'}</td>
+                      <td>{proposalMenuNames}</td>
                       <td>{project.clientName}</td>
                       <td>{user?.name || '-'}</td>
                       <td>
@@ -493,7 +649,14 @@ const ProjectManagement = () => {
                 </div>
                 <div className="detail-item">
                   <label>提案メニュー:</label>
-                  <span>{proposalMenus.find(m => m.id === selectedProject.proposalMenuId)?.name || '-'}</span>
+                  <span>{
+                    selectedProject.proposalMenuIds 
+                      ? selectedProject.proposalMenuIds
+                          .map(id => proposalMenus.find(m => m.id === id)?.name)
+                          .filter(Boolean)
+                          .join(', ')
+                      : proposalMenus.find(m => m.id === selectedProject.proposalMenuId)?.name || '-'
+                  }</span>
                 </div>
                 <div className="detail-item">
                   <label>ステータス:</label>
@@ -538,6 +701,16 @@ const ProjectManagement = () => {
                     onChange={(e) => setEditFormData({...editFormData, title: e.target.value})}
                   />
                 </div>
+                
+                <div className="form-group">
+                  <label>クライアント名:</label>
+                  <input 
+                    type="text" 
+                    value={editFormData.clientName || ''} 
+                    onChange={(e) => setEditFormData({...editFormData, clientName: e.target.value})}
+                  />
+                </div>
+                
                 <div className="form-group">
                   <label>商材名:</label>
                   <input 
@@ -546,6 +719,50 @@ const ProjectManagement = () => {
                     onChange={(e) => setEditFormData({...editFormData, productName: e.target.value})}
                   />
                 </div>
+                
+                <div className="form-group">
+                  <label>提案メニュー:</label>
+                  <div className="multi-select-dropdown">
+                    <div 
+                      className="dropdown-header"
+                      onClick={() => setIsEditDropdownOpen(!isEditDropdownOpen)}
+                    >
+                      {editProposalMenus.length > 0 
+                        ? `${editProposalMenus.length}個選択中: ${getEditSelectedMenuNames()}`
+                        : '選択してください'
+                      }
+                      <span className="dropdown-arrow">{isEditDropdownOpen ? '▲' : '▼'}</span>
+                    </div>
+                    {isEditDropdownOpen && (
+                      <div className="dropdown-list">
+                        {proposalMenus.map(menu => (
+                          <label key={menu.id} className="checkbox-item">
+                            <input
+                              type="checkbox"
+                              checked={editProposalMenus.includes(menu.id)}
+                              onChange={() => toggleEditProposalMenu(menu.id)}
+                            />
+                            <span>{menu.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="form-group">
+                  <label>担当者:</label>
+                  <select 
+                    value={editFormData.assigneeId || ''} 
+                    onChange={(e) => setEditFormData({...editFormData, assigneeId: e.target.value})}
+                  >
+                    <option value="">選択してください</option>
+                    {users.map(user => (
+                      <option key={user.id} value={user.id}>{user.name}</option>
+                    ))}
+                  </select>
+                </div>
+                
                 <div className="form-group">
                   <label>ステータス:</label>
                   <select 
@@ -559,6 +776,15 @@ const ProjectManagement = () => {
                     <option value="active">稼働中</option>
                     <option value="completed">稼働終了</option>
                   </select>
+                </div>
+                
+                <div className="form-group">
+                  <label>最終接触日:</label>
+                  <input 
+                    type="date" 
+                    value={editFormData.lastContactDate || ''} 
+                    onChange={(e) => setEditFormData({...editFormData, lastContactDate: e.target.value})}
+                  />
                 </div>
               </div>
               <div className="modal-actions">
@@ -954,6 +1180,71 @@ const ProjectManagement = () => {
           padding: 40px;
           color: #666;
           font-style: italic;
+        }
+
+        /* Multi-select dropdown styles */
+        .multi-select-dropdown {
+          position: relative;
+          width: 100%;
+        }
+        
+        .dropdown-header {
+          padding: 8px 12px;
+          border: 1px solid #ddd;
+          border-radius: 4px;
+          background: white;
+          cursor: pointer;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          min-height: 40px;
+        }
+        
+        .dropdown-header:hover {
+          background: #f8f9fa;
+        }
+        
+        .dropdown-arrow {
+          margin-left: 10px;
+          font-size: 12px;
+          color: #666;
+        }
+        
+        .dropdown-list {
+          position: absolute;
+          top: 100%;
+          left: 0;
+          right: 0;
+          border: 1px solid #ddd;
+          border-top: none;
+          border-radius: 0 0 4px 4px;
+          background: white;
+          max-height: 200px;
+          overflow-y: auto;
+          z-index: 1000;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .checkbox-item {
+          display: flex;
+          align-items: center;
+          padding: 8px 12px;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        
+        .checkbox-item:hover {
+          background: #f8f9fa;
+        }
+        
+        .checkbox-item input[type="checkbox"] {
+          margin-right: 8px;
+          cursor: pointer;
+        }
+        
+        .checkbox-item span {
+          cursor: pointer;
+          user-select: none;
         }
 
         @media (max-width: 768px) {

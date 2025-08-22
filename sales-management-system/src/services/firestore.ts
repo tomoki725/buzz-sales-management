@@ -97,6 +97,11 @@ export const getProposalMenus = async (): Promise<ProposalMenu[]> => {
   });
 };
 
+export const updateProposalMenu = async (id: string, menuData: Partial<ProposalMenu>) => {
+  const docRef = doc(db, 'proposalMenus', id);
+  await updateDoc(docRef, menuData);
+};
+
 export const deleteProposalMenu = async (id: string) => {
   const docRef = doc(db, 'proposalMenus', id);
   await deleteDoc(docRef);
@@ -214,10 +219,32 @@ export const deleteActionLog = async (id: string) => {
 export const ordersCollection = collection(db, 'orders');
 
 export const createOrder = async (orderData: Omit<Order, 'id'>) => {
-  const docRef = await addDoc(ordersCollection, {
-    ...orderData,
-    orderDate: Timestamp.fromDate(orderData.orderDate)
-  });
+  // undefined値を除外したオブジェクトを作成
+  const cleanData: any = {
+    projectId: orderData.projectId,
+    clientId: orderData.clientId,
+    clientName: orderData.clientName,
+    projectTitle: orderData.projectTitle,
+    assigneeId: orderData.assigneeId,
+    orderDate: Timestamp.fromDate(orderData.orderDate),
+    proposalMenu: orderData.proposalMenu
+  };
+  
+  // オプショナルフィールドは値がある場合のみ追加
+  if (orderData.implementationMonth !== undefined) {
+    cleanData.implementationMonth = orderData.implementationMonth;
+  }
+  if (orderData.revenue !== undefined) {
+    cleanData.revenue = orderData.revenue;
+  }
+  if (orderData.cost !== undefined) {
+    cleanData.cost = orderData.cost;
+  }
+  if (orderData.grossProfit !== undefined) {
+    cleanData.grossProfit = orderData.grossProfit;
+  }
+  
+  const docRef = await addDoc(ordersCollection, cleanData);
   return docRef.id;
 };
 

@@ -10,7 +10,7 @@ import {
 } from '../services/firestore';
 import FreeWritingSection from '../components/FreeWritingSection';
 import { getCurrentWeek, getCurrentMonth } from '../utils/dateUtils';
-import type { User } from '../types';
+import type { User, Alert } from '../types';
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState<'personal' | 'department' | 'overall'>('overall');
@@ -42,6 +42,8 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState('');
   const [users, setUsers] = useState<User[]>([]);
+  const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [departments, setDepartments] = useState<string[]>([]);
   
   // 月別選択用
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7));
@@ -51,6 +53,33 @@ const Dashboard = () => {
   const [currentWeek] = useState(getCurrentWeek());
   const [currentMonth] = useState(getCurrentMonth());
   const [monthlyKpiData, setMonthlyKpiData] = useState({
+    totalDeals: 0,
+    totalOrders: 0,
+    newDeals: 0,
+    newOrders: 0,
+    existingDeals: 0,
+    existingOrders: 0,
+    totalRevenue: 0,
+    totalGrossProfit: 0,
+    activeClients: 0,
+    averageOrderValue: 0
+  });
+  
+  // 部署別KPI用
+  const [departmentKpiData, setDepartmentKpiData] = useState({
+    totalDeals: 0,
+    totalOrders: 0,
+    newDeals: 0,
+    newOrders: 0,
+    existingDeals: 0,
+    existingOrders: 0,
+    totalRevenue: 0,
+    totalGrossProfit: 0,
+    activeClients: 0,
+    averageOrderValue: 0
+  });
+  
+  const [departmentMonthlyKpiData, setDepartmentMonthlyKpiData] = useState({
     totalDeals: 0,
     totalOrders: 0,
     newDeals: 0,
@@ -80,19 +109,26 @@ const Dashboard = () => {
   // グラフデータ
   const [monthlyData, setMonthlyData] = useState<any[]>([]);
   const [yoyData, setYoyData] = useState<any[]>([]);
+  const [personalMonthlyData, setPersonalMonthlyData] = useState<any[]>([]);
+  const [departmentMonthlyData, setDepartmentMonthlyData] = useState<any[]>([]);
+  const [departmentComparisonData, setDepartmentComparisonData] = useState<any[]>([]);
+  
+  // アラート関連
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   
   useEffect(() => {
     loadData();
-  }, [activeTab, selectedUser]);
+  }, [activeTab, selectedUser, selectedDepartment]);
   
   useEffect(() => {
     loadOverallTargets();
   }, []);
   
   useEffect(() => {
-    if (selectedUser) {
-      loadPersonalTargets(selectedUser);
-    } else {
+    // loadData内でloadPersonalTargetsを呼び出すため、
+    // ここでは selectedUser が空の場合のみ初期化する
+    if (!selectedUser) {
       setPersonalTargets({
         newDeals: Array(12).fill(0),
         newOrders: Array(12).fill(0),
@@ -101,11 +137,26 @@ const Dashboard = () => {
         grossProfitBudget: Array(12).fill(0)
       });
     }
+    // selectedUserがある場合はloadData内で処理される
   }, [selectedUser]);
   
   useEffect(() => {
     loadMonthlyKpiData();
   }, [selectedMonth, selectedUser, activeTab]);
+  
+  useEffect(() => {
+    if (activeTab === 'department') {
+      loadDepartmentKpiData();
+    }
+  }, [selectedMonth, selectedDepartment, activeTab]);
+  
+  // ローカルストレージから削除されたアラートを読み込み
+  useEffect(() => {
+    const dismissed = localStorage.getItem('dismissedAlerts');
+    if (dismissed) {
+      setDismissedAlerts(new Set(JSON.parse(dismissed)));
+    }
+  }, []);
   
   const loadData = async () => {
     setLoading(true);
@@ -119,6 +170,14 @@ const Dashboard = () => {
       ]);
       
       setUsers(usersData);
+      
+      // 部署データの取得
+      const uniqueDepartments = Array.from(new Set(
+        usersData
+          .map(user => user.department)
+          .filter((dept): dept is string => dept !== undefined && dept.trim() !== '')
+      ));
+      setDepartments(uniqueDepartments);
       
       // フィルタリング
       console.log('=== データフィルタリング ===');
@@ -136,6 +195,17 @@ const Dashboard = () => {
         // 実績データも担当者でフィルタリング（直接assigneeIdを使用）
         filteredPerformance = performanceData.filter(perf => perf.assigneeId === selectedUser);
         console.log('個人タブ: 担当者フィルタ後の実績データ数:', filteredPerformance.length);
+      } else if (activeTab === 'department' && selectedDepartment) {
+        // 部署別フィルタリング
+        const departmentUserIds = usersData.filter(u => u.department === selectedDepartment).map(u => u.id);
+        filteredProjects = projectsData.filter(p => departmentUserIds.includes(p.assigneeId));
+        filteredLogs = logsData.filter(l => departmentUserIds.includes(l.assigneeId));
+        filteredPerformance = performanceData.filter(perf => departmentUserIds.includes(perf.assigneeId));
+        console.log('部署タブ: 部署フィルタ後のデータ数:', {
+          projects: filteredProjects.length,
+          logs: filteredLogs.length,
+          performance: filteredPerformance.length
+        });
       } else {
         console.log('全体タブ: フィルタなしの実績データ数:', filteredPerformance.length);
       }
@@ -183,7 +253,7 @@ const Dashboard = () => {
       // 2025年の客単価
       const averageOrderValue = activeClients > 0 ? totalGrossProfit / activeClients : 0;
       
-      setKpiData({
+      const kpiResult = {
         totalDeals: filteredLogs.length,
         totalOrders: filteredProjects.filter(p => p.status === 'won').length,
         newDeals: newDealProjects.length,
@@ -194,7 +264,14 @@ const Dashboard = () => {
         totalGrossProfit,
         activeClients,
         averageOrderValue
-      });
+      };
+      
+      setKpiData(kpiResult);
+      
+      // 部署別KPIも設定（部署タブの場合）
+      if (activeTab === 'department') {
+        setDepartmentKpiData(kpiResult);
+      }
       
       // 月別データ作成（2025年のデータのみ使用）
       const monthlyMap = new Map<string, { revenue: number; grossProfit: number }>();
@@ -285,6 +362,219 @@ const Dashboard = () => {
         .slice(0, 10);
       
       setYoyData(yoyChartData);
+      
+      // 個人用月別チャートデータ生成（個人タブ選択時のみ）
+      if (activeTab === 'personal' && selectedUser) {
+        console.log('=== 個人用月別チャートデータ生成 ===');
+        console.log('選択ユーザー:', selectedUser);
+        
+        // 個人目標データを読み込む
+        const personalTargetsData = await loadPersonalTargets(selectedUser);
+        console.log('読み込んだ個人目標データ:', personalTargetsData);
+        
+        const personalMonthlyMap = new Map<string, { actual: number; budget: number }>();
+        
+        // 2025年1-12月の初期化
+        for (let month = 1; month <= 12; month++) {
+          const monthKey = `2025-${month.toString().padStart(2, '0')}`;
+          personalMonthlyMap.set(monthKey, { actual: 0, budget: 0 });
+        }
+        
+        // 個人の実績データを月別で集計
+        const personal2025Performance = filteredPerformance.filter(p => 
+          p.recordingMonth.startsWith('2025-')
+        );
+        
+        personal2025Performance.forEach(p => {
+          const month = p.recordingMonth.substring(0, 7);
+          if (personalMonthlyMap.has(month)) {
+            const data = personalMonthlyMap.get(month)!;
+            data.actual += p.grossProfit;
+          }
+        });
+        
+        // 個人のBGT（予算）データを設定（返された値を直接使用）
+        personalTargetsData.grossProfitBudget.forEach((budget, index) => {
+          const monthKey = `2025-${(index + 1).toString().padStart(2, '0')}`;
+          if (personalMonthlyMap.has(monthKey)) {
+            const data = personalMonthlyMap.get(monthKey)!;
+            data.budget = budget;
+          }
+          console.log(`${index + 1}月BGT:`, budget);
+        });
+        
+        // チャートデータに変換
+        const personalChartData = Array.from(personalMonthlyMap.entries())
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([month, data]) => ({
+            month: `${month.substring(5)}月`,
+            BGT: data.budget,
+            実績: data.actual
+          }));
+        
+        console.log('個人月別チャートデータ:', personalChartData);
+        setPersonalMonthlyData(personalChartData);
+      } else {
+        setPersonalMonthlyData([]);
+      }
+      
+      // 部署別月別チャートデータ生成（部署タブ選択時のみ）
+      if (activeTab === 'department') {
+        console.log('=== 部署別月別チャートデータ生成 ===');
+        console.log('選択部署:', selectedDepartment);
+        
+        if (selectedDepartment) {
+          // 部署の目標データを読み込む
+          const departmentBGT = await loadDepartmentTargets(selectedDepartment, usersData);
+          
+          const departmentMonthlyMap = new Map<string, { grossProfit: number; budget: number }>();
+          
+          // 2025年1-12月の初期化
+          for (let month = 1; month <= 12; month++) {
+            const monthKey = `2025-${month.toString().padStart(2, '0')}`;
+            departmentMonthlyMap.set(monthKey, { 
+              grossProfit: 0, 
+              budget: departmentBGT[month - 1] || 0 
+            });
+          }
+          
+          // 部署の実績データを月別で集計
+          filteredPerformance.filter(p => p.recordingMonth.startsWith('2025-')).forEach(p => {
+            const month = p.recordingMonth.substring(0, 7);
+            if (departmentMonthlyMap.has(month)) {
+              const data = departmentMonthlyMap.get(month)!;
+              data.grossProfit += p.grossProfit;
+            }
+          });
+          
+          // チャートデータに変換
+          const departmentChartData = Array.from(departmentMonthlyMap.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([month, data]) => ({
+              month: `${month.substring(5)}月`,
+              粗利: data.grossProfit,
+              BGT: data.budget
+            }));
+          
+          console.log('部署別月別チャートデータ:', departmentChartData);
+          setDepartmentMonthlyData(departmentChartData);
+        } else {
+          setDepartmentMonthlyData([]);
+        }
+        
+        // 部署比較データ生成
+        const departmentComparisonMap = new Map<string, number>();
+        
+        departments.forEach(dept => {
+          const deptUserIds = usersData.filter(u => u.department === dept).map(u => u.id);
+          const deptPerformance = performanceData.filter(p => 
+            deptUserIds.includes(p.assigneeId) && p.recordingMonth.startsWith('2025-')
+          );
+          const deptGrossProfit = deptPerformance.reduce((sum, p) => sum + p.grossProfit, 0);
+          departmentComparisonMap.set(dept, deptGrossProfit);
+        });
+        
+        const departmentComparisonChartData = Array.from(departmentComparisonMap.entries())
+          .map(([dept, grossProfit]) => ({
+            department: dept.length > 8 ? dept.substring(0, 8) + '...' : dept,
+            粗利: grossProfit
+          }))
+          .sort((a, b) => b.粗利 - a.粗利);
+        
+        console.log('部署比較チャートデータ:', departmentComparisonChartData);
+        setDepartmentComparisonData(departmentComparisonChartData);
+      } else {
+        setDepartmentMonthlyData([]);
+        setDepartmentComparisonData([]);
+      }
+      
+      // アラート判定処理（全体タブのみ）
+      if (activeTab === 'overall') {
+        console.log('=== アラート判定開始 ===');
+        const generatedAlerts: Alert[] = [];
+        const now = new Date();
+        const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+        const oneMonthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+        
+        // アラート対象クライアントのフィルタリング
+        // 1. アクションログが存在するクライアントを取得
+        const clientsWithActionLogs = new Set();
+        logsData.forEach(log => {
+          const project = projectsData.find(p => p.id === log.projectId);
+          if (project) {
+            clientsWithActionLogs.add(project.clientName);
+          }
+        });
+        
+        // 2. 2025年7月以降に実績があるクライアントを取得
+        const clientsWithRecentPerformance = new Set(
+          performanceData
+            .filter(p => p.recordingMonth >= '2025-07')
+            .map(p => p.clientName)
+        );
+        
+        // 3. 両方の条件を満たすクライアントのみを対象とする
+        const targetClients = Array.from(clientsWithActionLogs).filter((clientName): clientName is string => 
+          typeof clientName === 'string' && clientsWithRecentPerformance.has(clientName)
+        );
+        
+        console.log('アクションログがあるクライアント数:', clientsWithActionLogs.size);
+        console.log('2025年7月以降実績があるクライアント数:', clientsWithRecentPerformance.size);
+        console.log('アラート対象クライアント数:', targetClients.length);
+        console.log('対象クライアント:', targetClients);
+        
+        targetClients.forEach(clientName => {
+          // 3ヶ月以上実績がないクライアントをチェック
+          const clientPerformance = performanceData.filter(p => p.clientName === clientName);
+          const latestPerformance = clientPerformance
+            .sort((a, b) => new Date(b.recordingMonth).getTime() - new Date(a.recordingMonth).getTime())[0];
+          
+          if (clientPerformance.length === 0 || 
+              (latestPerformance && new Date(latestPerformance.recordingMonth + '-01') < threeMonthsAgo)) {
+            const alertId = `performance-${clientName}`;
+            const lastDate = latestPerformance ? new Date(latestPerformance.recordingMonth + '-01') : new Date(0);
+            
+            generatedAlerts.push({
+              id: alertId,
+              type: 'performance',
+              clientName,
+              message: '3ヶ月以上実績が発生していません',
+              severity: 'error',
+              lastDate,
+              dismissed: false
+            });
+          }
+          
+          // 1ヶ月以上アクションログがないクライアントをチェック
+          const clientProjects = projectsData.filter(p => p.clientName === clientName);
+          const clientProjectIds = clientProjects.map(p => p.id);
+          const clientLogs = logsData.filter(log => clientProjectIds.includes(log.projectId));
+          const latestLog = clientLogs
+            .sort((a, b) => new Date(b.actionDate).getTime() - new Date(a.actionDate).getTime())[0];
+          
+          if (clientLogs.length === 0 || 
+              (latestLog && new Date(latestLog.actionDate) < oneMonthAgo)) {
+            const alertId = `action-${clientName}`;
+            const lastDate = latestLog ? new Date(latestLog.actionDate) : new Date(0);
+            
+            generatedAlerts.push({
+              id: alertId,
+              type: 'action',
+              clientName,
+              message: '1ヶ月以上アクションログが追加されていません',
+              severity: 'warning',
+              lastDate,
+              dismissed: false
+            });
+          }
+        });
+        
+        console.log('生成されたアラート数:', generatedAlerts.length);
+        setAlerts(generatedAlerts);
+      } else {
+        setAlerts([]);
+      }
+      
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     }
@@ -423,6 +713,95 @@ const Dashboard = () => {
     }
   };
 
+  const loadDepartmentKpiData = async () => {
+    // selectedMonthが空または部署が選択されていない場合は処理しない
+    if (!selectedMonth || !selectedDepartment) return;
+    
+    console.log('=== 部署別月別KPIデータ読み込み開始 ===');
+    console.log('選択された月:', selectedMonth);
+    console.log('選択された部署:', selectedDepartment);
+    
+    try {
+      const [projectsData, logsData, performanceData, clientsData, usersData] = await Promise.all([
+        getProjects(),
+        getActionLogs(),
+        getPerformance(),
+        getClients(),
+        getUsers()
+      ]);
+      
+      // 部署の担当者IDを取得
+      const departmentUserIds = usersData.filter(u => u.department === selectedDepartment).map(u => u.id);
+      
+      // 部署でフィルタリング
+      let filteredProjects = projectsData.filter(p => departmentUserIds.includes(p.assigneeId));
+      let filteredLogs = logsData.filter(l => departmentUserIds.includes(l.assigneeId));
+      let filteredPerformance = performanceData.filter(perf => departmentUserIds.includes(perf.assigneeId));
+      
+      // 選択された月のデータのみにフィルタリング
+      const monthlyPerformance = filteredPerformance.filter(p => p.recordingMonth.startsWith(selectedMonth));
+      
+      // 月別の商談・受注データをフィルタリング
+      const monthlyProjects = filteredProjects.filter(p => {
+        const createdMonth = p.createdAt.toISOString().substring(0, 7);
+        const lastContactMonth = p.lastContactDate?.toISOString().substring(0, 7);
+        return createdMonth === selectedMonth || lastContactMonth === selectedMonth;
+      });
+      
+      const monthlyLogs = filteredLogs.filter(l => {
+        const actionMonth = l.actionDate.toISOString().substring(0, 7);
+        return actionMonth === selectedMonth;
+      });
+      
+      // KPI計算
+      const newClientsSet = new Set<string>();
+      const existingClientsSet = new Set<string>();
+      
+      clientsData.forEach(client => {
+        if (client.status === 'new') {
+          newClientsSet.add(client.name);
+        } else {
+          existingClientsSet.add(client.name);
+        }
+      });
+      
+      const newDealProjects = monthlyProjects.filter(p => newClientsSet.has(p.clientName));
+      const existingDealProjects = monthlyProjects.filter(p => existingClientsSet.has(p.clientName));
+      const newOrderProjects = newDealProjects.filter(p => p.status === 'won');
+      const existingOrderProjects = existingDealProjects.filter(p => p.status === 'won');
+      
+      // 月別の売上・粗利計算
+      const totalRevenue = monthlyPerformance.reduce((sum, p) => sum + p.revenue, 0);
+      const totalGrossProfit = monthlyPerformance.reduce((sum, p) => sum + p.grossProfit, 0);
+      
+      // 稼働社数
+      const activeClientsSet = new Set(monthlyPerformance.map(p => p.clientName));
+      const activeClients = activeClientsSet.size;
+      
+      // 客単価
+      const averageOrderValue = activeClients > 0 ? totalGrossProfit / activeClients : 0;
+      
+      const departmentMonthlyKpiResult = {
+        totalDeals: monthlyLogs.length,
+        totalOrders: monthlyProjects.filter(p => p.status === 'won').length,
+        newDeals: newDealProjects.length,
+        newOrders: newOrderProjects.length,
+        existingDeals: existingDealProjects.length,
+        existingOrders: existingOrderProjects.length,
+        totalRevenue,
+        totalGrossProfit,
+        activeClients,
+        averageOrderValue
+      };
+      
+      console.log('部署別月別KPI結果:', departmentMonthlyKpiResult);
+      setDepartmentMonthlyKpiData(departmentMonthlyKpiResult);
+      
+    } catch (error) {
+      console.error('Error loading department monthly KPI data:', error);
+    }
+  };
+
   const loadOverallTargets = async () => {
     try {
       // 全体目標は特別なuserIdで管理
@@ -479,8 +858,67 @@ const Dashboard = () => {
       });
       
       setPersonalTargets(newTargets);
+      return newTargets; // 新しい目標データを返す
     } catch (error) {
       console.error('Error loading personal targets:', error);
+      return {
+        newDeals: Array(12).fill(0),
+        newOrders: Array(12).fill(0),
+        existingDeals: Array(12).fill(0),
+        existingOrders: Array(12).fill(0),
+        grossProfitBudget: Array(12).fill(0)
+      };
+    }
+  };
+
+  const loadDepartmentTargets = async (department: string, usersData: User[]) => {
+    try {
+      console.log('=== 部署別目標データ読み込み開始 ===');
+      console.log('対象部署:', department);
+      
+      // 部署内のユーザーIDを取得
+      const deptUserIds = usersData.filter(u => u.department === department).map(u => u.id);
+      console.log('部署メンバー数:', deptUserIds.length);
+      
+      // 各メンバーの目標データを並行取得
+      const memberTargetsPromises = deptUserIds.map(async (userId) => {
+        const targetsData = await getSalesTargets(userId);
+        const userTargets = {
+          newDeals: Array(12).fill(0),
+          newOrders: Array(12).fill(0),
+          existingDeals: Array(12).fill(0),
+          existingOrders: Array(12).fill(0),
+          grossProfitBudget: Array(12).fill(0)
+        };
+        
+        const currentYear = new Date().getFullYear();
+        targetsData.forEach(target => {
+          if (target.year === currentYear && target.month >= 1 && target.month <= 12) {
+            const index = target.month - 1;
+            userTargets.grossProfitBudget[index] = target.grossProfitBudget || 0;
+          }
+        });
+        
+        return { userId, targets: userTargets };
+      });
+      
+      const memberTargets = await Promise.all(memberTargetsPromises);
+      console.log('取得したメンバー目標データ:', memberTargets);
+      
+      // 部署全体の月別BGTを算出
+      const departmentBGT = Array(12).fill(0);
+      memberTargets.forEach(member => {
+        member.targets.grossProfitBudget.forEach((budget, index) => {
+          departmentBGT[index] += budget;
+        });
+      });
+      
+      console.log('部署別月別BGT:', departmentBGT);
+      return departmentBGT;
+      
+    } catch (error) {
+      console.error('Error loading department targets:', error);
+      return Array(12).fill(0);
     }
   };
 
@@ -538,6 +976,17 @@ const Dashboard = () => {
     const targetStr = target > 0 ? (isMonetary ? Math.round(target).toLocaleString() : target.toString()) : '-';
     return `${prefix}${actualStr} / ${prefix}${targetStr}`;
   };
+
+  // アラート削除機能
+  const dismissAlert = (alertId: string) => {
+    const newDismissedAlerts = new Set(dismissedAlerts);
+    newDismissedAlerts.add(alertId);
+    setDismissedAlerts(newDismissedAlerts);
+    localStorage.setItem('dismissedAlerts', JSON.stringify(Array.from(newDismissedAlerts)));
+  };
+
+  // 表示用アラートをフィルタリング
+  const visibleAlerts = alerts.filter(alert => !dismissedAlerts.has(alert.id));
 
   return (
     <div className="dashboard">
@@ -666,6 +1115,41 @@ const Dashboard = () => {
                 <div className="kpi-value">¥{Math.round(monthlyKpiData.averageOrderValue).toLocaleString()}</div>
               </div>
             </div>
+            
+          {/* アラートスペース */}
+          {visibleAlerts.length > 0 && (
+            <div className="alert-section">
+              <h2>⚠️ アラート</h2>
+              <div className="alert-container">
+                {visibleAlerts.map(alert => (
+                  <div 
+                    key={alert.id} 
+                    className={`alert-card ${alert.severity}`}
+                  >
+                    <div className="alert-header">
+                      <div className="alert-icon">
+                        {alert.severity === 'error' ? '🚨' : '⚠️'}
+                      </div>
+                      <div className="alert-content">
+                        <div className="alert-client">{alert.clientName}</div>
+                        <div className="alert-message">{alert.message}</div>
+                        <div className="alert-date">
+                          最終: {alert.lastDate.getTime() === 0 ? 'データなし' : alert.lastDate.toLocaleDateString('ja-JP')}
+                        </div>
+                      </div>
+                      <button 
+                        className="alert-dismiss"
+                        onClick={() => dismissAlert(alert.id)}
+                        title="アラートを削除"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
             
           {/* フリーライティングスペース */}
           <FreeWritingSection
@@ -849,14 +1333,209 @@ const Dashboard = () => {
               title="📅 週次フリーライティングスペース"
             />
           )}
+          
+          {/* 個人用月別BGT実績グラフ */}
+          {selectedUser && (
+            <div className="chart-section" style={{ marginTop: '30px' }}>
+              <div className="card">
+                <h3>月別BGT vs 実績（個人）</h3>
+                {personalMonthlyData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={400}>
+                    <BarChart data={personalMonthlyData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Tooltip formatter={(value: number) => `¥${Math.round(value).toLocaleString()}`} />
+                      <Legend />
+                      <Bar dataKey="BGT" fill="#82ca9d" name="BGT（予算）" />
+                      <Bar dataKey="実績" fill="#8884d8" name="実績" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="chart-placeholder">
+                    担当者を選択してください
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {activeTab === 'department' && (
         <div className="dashboard-content">
-          <h2>サマリー（部署別）</h2>
-          <div className="card">
-            <p>部署別の統計情報を表示します</p>
+          <h2>年間累計KPI（部署別）</h2>
+          <div className="form-group" style={{ marginBottom: '20px' }}>
+            <label>部署選択:</label>
+            <select 
+              value={selectedDepartment} 
+              onChange={(e) => setSelectedDepartment(e.target.value)}
+              style={{ marginLeft: '10px', padding: '5px' }}
+            >
+              <option value="">選択してください</option>
+              {departments.map(dept => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="kpi-grid">
+            <div className="kpi-card">
+              <h3>総商談数</h3>
+              <div className="kpi-value">{loading ? '-' : departmentKpiData.totalDeals}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>総受注数</h3>
+              <div className="kpi-value">{loading ? '-' : departmentKpiData.totalOrders}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>新規商談数</h3>
+              <div className="kpi-value">{loading ? '-' : departmentKpiData.newDeals}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>新規受注数</h3>
+              <div className="kpi-value">{loading ? '-' : departmentKpiData.newOrders}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>既存商談数</h3>
+              <div className="kpi-value">{loading ? '-' : departmentKpiData.existingDeals}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>既存受注数</h3>
+              <div className="kpi-value">{loading ? '-' : departmentKpiData.existingOrders}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>総粗利</h3>
+              <div className="kpi-value">{loading ? '-' : `¥${Math.round(departmentKpiData.totalGrossProfit).toLocaleString()}`}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>稼働社数</h3>
+              <div className="kpi-value">{loading ? '-' : departmentKpiData.activeClients}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>客単価</h3>
+              <div className="kpi-value">{loading ? '-' : `¥${Math.round(departmentKpiData.averageOrderValue).toLocaleString()}`}</div>
+            </div>
+          </div>
+          
+          <h2>月別KPI</h2>
+          <div className="month-selector">
+            <label>月選択:</label>
+            <select 
+              value={selectedMonth} 
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              style={{ marginLeft: '10px', padding: '8px 12px', borderRadius: '4px', border: '1px solid #ddd' }}
+            >
+              <option value="">選択してください</option>
+              {availableMonths.map(month => (
+                <option key={month} value={month}>
+                  {month.substring(0, 4)}年{month.substring(5, 7)}月
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="kpi-grid" style={{ marginTop: '20px' }}>
+            <div className="kpi-card">
+              <h3>総商談数</h3>
+              <div className="kpi-value">{departmentMonthlyKpiData.totalDeals}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>総受注数</h3>
+              <div className="kpi-value">{departmentMonthlyKpiData.totalOrders}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>新規商談数</h3>
+              <div className="kpi-value">{departmentMonthlyKpiData.newDeals}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>新規受注数</h3>
+              <div className="kpi-value">{departmentMonthlyKpiData.newOrders}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>既存商談数</h3>
+              <div className="kpi-value">{departmentMonthlyKpiData.existingDeals}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>既存受注数</h3>
+              <div className="kpi-value">{departmentMonthlyKpiData.existingOrders}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>月粗利</h3>
+              <div className="kpi-value">¥{Math.round(departmentMonthlyKpiData.totalGrossProfit).toLocaleString()}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>稼働社数</h3>
+              <div className="kpi-value">{departmentMonthlyKpiData.activeClients}</div>
+            </div>
+            <div className="kpi-card">
+              <h3>客単価</h3>
+              <div className="kpi-value">¥{Math.round(departmentMonthlyKpiData.averageOrderValue).toLocaleString()}</div>
+            </div>
+          </div>
+          
+          {/* 部署別グラフセクション */}
+          <div className="chart-section" style={{ marginTop: '30px' }}>
+            <div className="card">
+              <h3>月別BGT vs 実績（部署別）</h3>
+              {departmentMonthlyData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={departmentMonthlyData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" />
+                    <YAxis />
+                    <Tooltip formatter={(value: number) => `¥${Math.round(value).toLocaleString()}`} />
+                    <Legend />
+                    <Bar dataKey="BGT" fill="#82ca9d" name="BGT（予算）" />
+                    <Bar dataKey="粗利" fill="#8884d8" name="実績" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p>部署を選択してください</p>
+              )}
+            </div>
+            
+            <div className="card">
+              <h3>月別 粗利推移（部署別）</h3>
+              {departmentMonthlyData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={departmentMonthlyData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" />
+                    <YAxis />
+                    <Tooltip formatter={(value: number) => `¥${Math.round(value).toLocaleString()}`} />
+                    <Legend />
+                    <Line type="monotone" dataKey="粗利" stroke="#82ca9d">
+                      <LabelList dataKey="粗利" position="top" formatter={(label: any) => `¥${Math.round(Number(label) || 0).toLocaleString()}`} />
+                    </Line>
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="chart-placeholder">
+                  部署を選択してください
+                </div>
+              )}
+            </div>
+            
+            <div className="card">
+              <h3>部署別粗利比較</h3>
+              {departmentComparisonData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={departmentComparisonData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="department" angle={-45} textAnchor="end" height={100} />
+                    <YAxis />
+                    <Tooltip formatter={(value: number) => `¥${Math.round(value).toLocaleString()}`} />
+                    <Legend />
+                    <Bar dataKey="粗利" fill="#8884d8" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="chart-placeholder">
+                  データがありません
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1180,6 +1859,108 @@ const Dashboard = () => {
         @media (max-width: 480px) {
           .month-grid {
             grid-template-columns: repeat(2, 1fr);
+          }
+        }
+        
+        /* アラートスペーススタイル */
+        .alert-section {
+          margin: 30px 0;
+        }
+        
+        .alert-section h2 {
+          margin-bottom: 15px;
+          color: #e65100;
+          font-size: 18px;
+        }
+        
+        .alert-container {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        
+        .alert-card {
+          background: white;
+          border-radius: 8px;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+          border-left: 4px solid;
+          overflow: hidden;
+        }
+        
+        .alert-card.warning {
+          border-left-color: #ff9800;
+        }
+        
+        .alert-card.error {
+          border-left-color: #f44336;
+        }
+        
+        .alert-header {
+          display: flex;
+          align-items: center;
+          padding: 15px;
+          gap: 12px;
+        }
+        
+        .alert-icon {
+          font-size: 20px;
+          flex-shrink: 0;
+        }
+        
+        .alert-content {
+          flex: 1;
+        }
+        
+        .alert-client {
+          font-weight: bold;
+          color: #333;
+          margin-bottom: 4px;
+        }
+        
+        .alert-message {
+          color: #666;
+          font-size: 14px;
+          margin-bottom: 4px;
+        }
+        
+        .alert-date {
+          color: #999;
+          font-size: 12px;
+        }
+        
+        .alert-dismiss {
+          background: none;
+          border: none;
+          font-size: 18px;
+          cursor: pointer;
+          color: #999;
+          padding: 5px;
+          border-radius: 50%;
+          width: 30px;
+          height: 30px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        
+        .alert-dismiss:hover {
+          background-color: #f5f5f5;
+          color: #666;
+        }
+        
+        @media (max-width: 768px) {
+          .alert-header {
+            padding: 12px;
+            gap: 8px;
+          }
+          
+          .alert-client {
+            font-size: 14px;
+          }
+          
+          .alert-message {
+            font-size: 13px;
           }
         }
       `}</style>

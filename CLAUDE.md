@@ -1,4 +1,4 @@
-# Sales Management System Specifications
+# BuzzSalesMgr - 営業管理システム仕様書
 
 ## Technology Stack
 - **Build Tool**: Vite
@@ -80,7 +80,122 @@ https://sales-management-system-2b9db.web.app/projects
 - **リアルタイム更新**: Firestoreとの連携
 - **型安全性**: TypeScriptによる型定義
 
-### 最新アップデート (2025/8/20)
-1. **実績列の追加**: ActionLogのperformanceTypeフィールドとの連携
-2. **提案メニュー表示修正**: IDから名称表示への変更
-3. **デバッグ機能**: コンソール出力による動作確認機能
+### 最新アップデート (2025/8/22)
+1. **受注管理システム修正**: 受注ステータス案件の受注管理画面への自動同期機能実装
+2. **KPI管理入力改善**: 数値入力フィールドの直接入力対応と先頭0問題修正
+3. **個人BGTグラフ修正**: KPI管理で保存したBGTがダッシュボード個人グラフに正しく反映されるよう修正
+4. **部署別BGTグラフ追加**: 部署別タブに月別BGT vs 実績グラフを新規実装
+5. **部署選択問題修正**: 部署選択時の画面更新問題を修正
+6. **ログ記録フィールド修正**: 次回アクション日・次回アクションを任意項目に変更
+
+## 受注管理システム修正 (2025/8/22)
+
+### 問題と解決
+- **問題**: 案件管理で「受注」ステータスにした案件が受注管理に表示されない
+- **原因**: Firestoreの`undefined`値エラーとデータ作成タイミング問題
+- **解決**:
+  1. `firestore.ts`の`createOrder`関数で`undefined`値を除外
+  2. `ProjectManagement.tsx`の`syncExistingWonProjects`関数追加
+  3. `ActionLogRecord.tsx`の受注データ自動作成機能修正
+- **結果**: 既存・新規の受注案件が自動的に受注管理に反映
+
+### 技術実装
+```typescript
+// Firestore undefined値除外
+export const createOrder = async (orderData: Omit<Order, 'id'>) => {
+  const cleanData: any = { /* 必須フィールドのみ */ };
+  if (orderData.implementationMonth !== undefined) {
+    cleanData.implementationMonth = orderData.implementationMonth;
+  }
+  // ...
+};
+```
+
+## KPI管理入力改善 (2025/8/22)
+
+### 問題と解決
+- **問題**: 100入力時に「0100」になる、直接入力ができない
+- **原因**: 初期値`Array(12).fill(0)`による先頭0問題
+- **解決**:
+  1. 初期値を`Array(12).fill('')`（空文字）に変更
+  2. `handleTargetChange`関数でのデータ処理改善
+  3. 保存時に`Number(value) || 0`で変換
+- **結果**: 自然な数値入力と先頭0問題の解決
+
+## 個人BGTグラフ修正 (2025/8/22)
+
+### 問題と解決
+- **問題**: KPI管理で保存したBGTがダッシュボードのグラフに反映されない
+- **原因**: Reactのstate更新の非同期性による参照タイミング問題
+- **解決**:
+  1. `loadPersonalTargets`関数を修正して値を返すように変更
+  2. `loadData`内で返された値を直接使用
+  3. stateではなく最新データを即座に参照
+- **結果**: KPI管理で保存したBGTが即座にグラフに反映
+
+### 技術実装
+```typescript
+// Before: stateの非同期更新問題
+await loadPersonalTargets(selectedUser);
+personalTargets.grossProfitBudget.forEach(...); // 古い値
+
+// After: 直接返された値を使用
+const personalTargetsData = await loadPersonalTargets(selectedUser);
+personalTargetsData.grossProfitBudget.forEach(...); // 最新値
+```
+
+## 部署別BGTグラフ追加 (2025/8/22)
+
+### 新機能実装
+- **配置**: 部署別タブの最上部に「月別BGT vs 実績（部署別）」グラフを追加
+- **BGT算出方式**: 部署内全メンバーの個人目標を合計して部署BGTとして算出
+- **グラフタイプ**: 棒グラフ（緑色BGT、青色実績の並列表示）
+- **データ連携**: KPI管理で設定した個人BGTが部署別グラフに自動反映
+
+### 技術実装
+```typescript
+const loadDepartmentTargets = async (department: string, usersData: User[]) => {
+  const deptUserIds = usersData.filter(u => u.department === department).map(u => u.id);
+  const memberTargetsPromises = deptUserIds.map(async (userId) => {
+    // 各メンバーの目標を並行取得
+  });
+  const memberTargets = await Promise.all(memberTargetsPromises);
+  
+  // 部署全体の月別BGTを算出
+  const departmentBGT = Array(12).fill(0);
+  memberTargets.forEach(member => {
+    member.targets.grossProfitBudget.forEach((budget, index) => {
+      departmentBGT[index] += budget;
+    });
+  });
+  return departmentBGT;
+};
+```
+
+## 部署選択問題修正 (2025/8/22)
+
+### 問題と解決
+- **問題**: 部署選択で「大谷チーム」を選択しても画面が変わらない
+- **原因**: `loadData`のuseEffect依存配列に`selectedDepartment`が含まれていない
+- **解決**: 依存配列に`selectedDepartment`を追加
+- **結果**: 部署選択時にリアルタイムでデータが更新される
+
+```typescript
+// Before
+useEffect(() => {
+  loadData();
+}, [activeTab, selectedUser]);
+
+// After  
+useEffect(() => {
+  loadData();
+}, [activeTab, selectedUser, selectedDepartment]);
+```
+
+## ログ記録フィールド修正 (2025/8/22)
+
+### 変更内容
+- **次回アクション日**: 必須項目 → 任意項目
+- **次回アクション**: 必須項目 → 任意項目
+- **変更箇所**: `ActionLogRecord.tsx`の`required`属性と必須マーク（*）を削除
+- **目的**: より柔軟なログ記録を可能にする

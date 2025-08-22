@@ -8,7 +8,9 @@ import {
   getUsers,
   getProposalMenus,
   createClient,
-  getClients
+  getClients,
+  createOrder,
+  getOrders
 } from '../services/firestore';
 import type { User, ProposalMenu, Project } from '../types';
 
@@ -26,7 +28,7 @@ const ActionLogRecord = () => {
     title: locationState?.title || '',
     clientName: locationState?.clientName || '',
     productName: locationState?.productName || '',
-    proposalMenu: locationState?.proposalMenuId || '',
+    proposalMenus: locationState?.proposalMenuIds || [],
     assignee: locationState?.assigneeId || '',
     actionDate: '',
     nextActionDate: '',
@@ -36,6 +38,8 @@ const ActionLogRecord = () => {
     summary: '',
     performanceType: 'unselected' as 'unselected' | 'new' | 'existing'
   });
+  
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -53,6 +57,48 @@ const ActionLogRecord = () => {
       setProjects(projectsData);
     } catch (error) {
       console.error('Error loading data:', error);
+    }
+  };
+
+  const createOrderIfNotExists = async (projectId: string, projectData: any) => {
+    try {
+      console.log('受注データ作成処理開始:', { projectId, projectData });
+      
+      // 既存の受注データをチェック
+      const existingOrders = await getOrders();
+      console.log('既存受注データ数:', existingOrders.length);
+      const existingOrder = existingOrders.find(order => order.projectId === projectId);
+      
+      if (existingOrder) {
+        console.log('受注データは既に存在します:', existingOrder.id);
+        return;
+      }
+
+      // 受注データを作成
+      const proposalMenuNames = projectData.proposalMenuIds 
+        ? projectData.proposalMenuIds
+            .map((id: string) => proposalMenus.find(menu => menu.id === id)?.name)
+            .filter(Boolean)
+            .join(', ')
+        : proposalMenus.find(menu => menu.id === projectData.proposalMenuId)?.name || '';
+      
+      const orderData: any = {
+        projectId: projectId,
+        clientId: projectData.clientId || '',
+        clientName: projectData.clientName,
+        projectTitle: projectData.title || projectData.productName || 'タイトル未設定',
+        assigneeId: projectData.assigneeId,
+        orderDate: new Date(),
+        proposalMenu: proposalMenuNames
+        // implementationMonth, revenue, cost, grossProfit は undefined なので省略
+      };
+
+      console.log('受注データを作成中:', orderData);
+      await createOrder(orderData);
+      console.log('受注データを自動作成しました:', projectData.clientName, '-', projectData.title || projectData.productName);
+    } catch (error) {
+      console.error('受注データ作成エラー:', error);
+      // エラーが発生してもログ作成は成功として処理を続行
     }
   };
 
@@ -78,26 +124,49 @@ const ActionLogRecord = () => {
       );
       
       let projectId: string;
+      let projectData: any;
+      const newStatus = formData.status ? formData.status as 'proposal' | 'negotiation' | 'lost' | 'won' | 'active' | 'completed' : undefined;
+      
       if (project) {
         // 既存プロジェクトを更新
-        await updateProject(project.id, {
-          status: formData.status ? formData.status as 'proposal' | 'negotiation' | 'lost' | 'won' | 'active' | 'completed' : undefined,
+        const updateData = {
+          status: newStatus,
           lastContactDate: new Date(formData.actionDate)
-        });
+        };
+        await updateProject(project.id, updateData);
+        
         projectId = project.id;
+        projectData = {
+          ...project,
+          ...updateData,
+          clientId: client?.id || project.clientId
+        };
+
+        // ステータスが'won'（受注）に変更された場合、受注データを自動作成
+        if (newStatus === 'won' && project.status !== 'won') {
+          await createOrderIfNotExists(projectId, projectData);
+        }
       } else {
         // 新規プロジェクトを作成
-        projectId = await createProject({
+        projectData = {
           title: formData.title,
           clientId: client?.id || '',
           clientName: formData.clientName,
           productName: formData.productName,
-          proposalMenuId: formData.proposalMenu,
+          proposalMenuId: formData.proposalMenus[0] || '', // 後方互換性
+          proposalMenuIds: formData.proposalMenus,
           assigneeId: formData.assignee,
-          status: formData.status ? formData.status as 'proposal' | 'negotiation' | 'lost' | 'won' | 'active' | 'completed' : 'proposal',
+          status: newStatus || 'proposal',
           createdAt: new Date(),
           lastContactDate: new Date(formData.actionDate)
-        });
+        };
+        
+        projectId = await createProject(projectData);
+
+        // 新規プロジェクトがいきなり'won'（受注）の場合、受注データを自動作成
+        if (newStatus === 'won') {
+          await createOrderIfNotExists(projectId, { ...projectData, clientId: client?.id });
+        }
       }
       
       // アクションログを保存
@@ -133,6 +202,22 @@ const ActionLogRecord = () => {
       ...prev,
       [name]: value
     }));
+  };
+  
+  const toggleProposalMenu = (menuId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      proposalMenus: prev.proposalMenus.includes(menuId)
+        ? prev.proposalMenus.filter((id: string) => id !== menuId)
+        : [...prev.proposalMenus, menuId]
+    }));
+  };
+  
+  const getSelectedMenuNames = () => {
+    return proposalMenus
+      .filter((menu: ProposalMenu) => formData.proposalMenus.includes(menu.id))
+      .map((menu: ProposalMenu) => menu.name)
+      .join(', ');
   };
 
   return (
@@ -180,18 +265,32 @@ const ActionLogRecord = () => {
 
             <div className="form-group">
               <label htmlFor="proposalMenu">提案メニュー <span className="required">*</span></label>
-              <select
-                id="proposalMenu"
-                name="proposalMenu"
-                value={formData.proposalMenu}
-                onChange={handleInputChange}
-                required
-              >
-                <option value="">選択してください</option>
-                {proposalMenus.map(menu => (
-                  <option key={menu.id} value={menu.id}>{menu.name}</option>
-                ))}
-              </select>
+              <div className="multi-select-dropdown">
+                <div 
+                  className="dropdown-header"
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                >
+                  {formData.proposalMenus.length > 0 
+                    ? `${formData.proposalMenus.length}個選択中: ${getSelectedMenuNames()}`
+                    : '選択してください'
+                  }
+                  <span className="dropdown-arrow">{isDropdownOpen ? '▲' : '▼'}</span>
+                </div>
+                {isDropdownOpen && (
+                  <div className="dropdown-list">
+                    {proposalMenus.map(menu => (
+                      <label key={menu.id} className="checkbox-item">
+                        <input
+                          type="checkbox"
+                          checked={formData.proposalMenus.includes(menu.id)}
+                          onChange={() => toggleProposalMenu(menu.id)}
+                        />
+                        <span>{menu.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="form-group">
@@ -223,14 +322,13 @@ const ActionLogRecord = () => {
             </div>
 
             <div className="form-group">
-              <label htmlFor="nextActionDate">次回アクション日 <span className="required">*</span></label>
+              <label htmlFor="nextActionDate">次回アクション日</label>
               <input
                 type="date"
                 id="nextActionDate"
                 name="nextActionDate"
                 value={formData.nextActionDate}
                 onChange={handleInputChange}
-                required
               />
             </div>
 
@@ -279,14 +377,13 @@ const ActionLogRecord = () => {
           </div>
 
           <div className="form-group">
-            <label htmlFor="nextAction">次回アクション <span className="required">*</span></label>
+            <label htmlFor="nextAction">次回アクション</label>
             <textarea
               id="nextAction"
               name="nextAction"
               value={formData.nextAction}
               onChange={handleInputChange}
               rows={3}
-              required
             />
           </div>
 
@@ -334,6 +431,70 @@ const ActionLogRecord = () => {
         
         .required {
           color: #d32f2f;
+        }
+        
+        .multi-select-dropdown {
+          position: relative;
+          width: 100%;
+        }
+        
+        .dropdown-header {
+          padding: 8px 12px;
+          border: 1px solid #ddd;
+          border-radius: 4px;
+          background: white;
+          cursor: pointer;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          min-height: 40px;
+        }
+        
+        .dropdown-header:hover {
+          background: #f8f9fa;
+        }
+        
+        .dropdown-arrow {
+          margin-left: 10px;
+          font-size: 12px;
+          color: #666;
+        }
+        
+        .dropdown-list {
+          position: absolute;
+          top: 100%;
+          left: 0;
+          right: 0;
+          border: 1px solid #ddd;
+          border-top: none;
+          border-radius: 0 0 4px 4px;
+          background: white;
+          max-height: 200px;
+          overflow-y: auto;
+          z-index: 1000;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .checkbox-item {
+          display: flex;
+          align-items: center;
+          padding: 8px 12px;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        
+        .checkbox-item:hover {
+          background: #f8f9fa;
+        }
+        
+        .checkbox-item input[type="checkbox"] {
+          margin-right: 8px;
+          cursor: pointer;
+        }
+        
+        .checkbox-item span {
+          cursor: pointer;
+          user-select: none;
         }
         
         @media (max-width: 768px) {
