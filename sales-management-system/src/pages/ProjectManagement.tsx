@@ -829,7 +829,7 @@ const ProjectManagement = () => {
           gap: 20px;
           margin-bottom: 20px;
           padding: 20px;
-          background: white;
+          background: #ffffff;
           border-radius: 8px;
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
@@ -934,7 +934,7 @@ const ProjectManagement = () => {
         }
         
         .modal-content {
-          background: white;
+          background: #ffffff;
           border-radius: 8px;
           padding: 0;
           width: 90%;
@@ -1125,7 +1125,7 @@ const ProjectManagement = () => {
         
         .accordion-content {
           padding: 20px;
-          background-color: white;
+          background-color: #ffffff;
           border-top: 1px solid #e0e0e0;
           animation: slideDown 0.3s ease-out;
         }
@@ -1192,7 +1192,7 @@ const ProjectManagement = () => {
           padding: 8px 12px;
           border: 1px solid #ddd;
           border-radius: 4px;
-          background: white;
+          background: #ffffff;
           cursor: pointer;
           display: flex;
           justify-content: space-between;
@@ -1218,7 +1218,7 @@ const ProjectManagement = () => {
           border: 1px solid #ddd;
           border-top: none;
           border-radius: 0 0 4px 4px;
-          background: white;
+          background: #ffffff;
           max-height: 200px;
           overflow-y: auto;
           z-index: 1000;

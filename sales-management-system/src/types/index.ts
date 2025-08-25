@@ -37,7 +37,8 @@ export interface Project {
   clientId: string;
   clientName: string;
   productName: string;
-  proposalMenuId: string;
+  proposalMenuId: string; // 後方互換性のため残す（非推奨）
+  proposalMenuIds?: string[]; // 複数選択対応（新規）
   assigneeId: string;
   status: 'proposal' | 'negotiation' | 'lost' | 'won' | 'active' | 'completed';
   createdAt: Date;
@@ -94,4 +95,14 @@ export interface FreeWriting {
   content: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface Alert {
+  id: string;
+  type: 'performance' | 'action';
+  clientName: string;
+  message: string;
+  severity: 'warning' | 'error';
+  lastDate: Date;
+  dismissed: boolean;
 }

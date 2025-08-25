@@ -10,7 +10,7 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f5f5f5;
+  background-color: #f8f9fa;
 }
 
 .app {
@@ -22,7 +22,7 @@ body {
   max-width: 1400px;
   margin: 0 auto;
   padding: 20px 40px;
-  background-color: white;
+  background-color: #fafafa;
   min-height: calc(100vh - 104px);
   box-shadow: 0 0 20px rgba(0, 0, 0, 0.05);
 }

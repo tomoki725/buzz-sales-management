@@ -1690,7 +1690,7 @@ const Dashboard = () => {
         }
         
         .kpi-card {
-          background: white;
+          background: #ffffff;
           padding: 20px;
           border-radius: 8px;
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -1728,7 +1728,7 @@ const Dashboard = () => {
         .month-selector {
           margin: 20px 0;
           padding: 15px;
-          background: white;
+          background: #ffffff;
           border-radius: 8px;
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
           display: flex;
@@ -1765,7 +1765,7 @@ const Dashboard = () => {
         }
         
         .modal-content {
-          background: white;
+          background: #ffffff;
           border-radius: 8px;
           max-width: 1200px;
           max-height: 90vh;
@@ -1880,7 +1880,7 @@ const Dashboard = () => {
         }
         
         .alert-card {
-          background: white;
+          background: #ffffff;
           border-radius: 8px;
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
           border-left: 4px solid;

@@ -442,7 +442,7 @@ const ActionLogRecord = () => {
           padding: 8px 12px;
           border: 1px solid #ddd;
           border-radius: 4px;
-          background: white;
+          background: #ffffff;
           cursor: pointer;
           display: flex;
           justify-content: space-between;
@@ -468,7 +468,7 @@ const ActionLogRecord = () => {
           border: 1px solid #ddd;
           border-top: none;
           border-radius: 0 0 4px 4px;
-          background: white;
+          background: #ffffff;
           max-height: 200px;
           overflow-y: auto;
           z-index: 1000;
