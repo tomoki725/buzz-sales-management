@@ -3,17 +3,26 @@ import {
   getOrders, 
   getUsers,
   getProposalMenus,
-  updateOrder
+  updateOrder,
+  getProjects
 } from '../services/firestore';
-import type { Order, User, ProposalMenu } from '../types';
+import type { Order, User, ProposalMenu, Project } from '../types';
 
 const OrderManagement = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [proposalMenus, setProposalMenus] = useState<ProposalMenu[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingOrder, setEditingOrder] = useState<string | null>(null);
   const [editMonth, setEditMonth] = useState<{ [key: string]: string }>({});
+  
+  // フィルター用のstate
+  const [assigneeFilter, setAssigneeFilter] = useState<string>('');
+  const [startDateFilter, setStartDateFilter] = useState<string>('');
+  const [endDateFilter, setEndDateFilter] = useState<string>('');
+  const [proposalMenuFilter, setProposalMenuFilter] = useState<string>('');
+  const [implementationMonthFilter, setImplementationMonthFilter] = useState<string>('');
 
   useEffect(() => {
     loadData();
@@ -22,10 +31,11 @@ const OrderManagement = () => {
   const loadData = async () => {
     try {
       console.log('=== 受注管理データ読み込み開始 ===');
-      const [ordersData, usersData, menusData] = await Promise.all([
+      const [ordersData, usersData, menusData, projectsData] = await Promise.all([
         getOrders(),
         getUsers(),
-        getProposalMenus()
+        getProposalMenus(),
+        getProjects()
       ]);
       console.log('取得した受注データ:', ordersData);
       console.log('受注データ件数:', ordersData.length);
@@ -33,6 +43,7 @@ const OrderManagement = () => {
       setOrders(ordersData);
       setUsers(usersData);
       setProposalMenus(menusData);
+      setProjects(projectsData);
       
       // 実施月の初期値を設定
       const monthValues: { [key: string]: string } = {};
@@ -53,9 +64,12 @@ const OrderManagement = () => {
 
   const handleSaveMonth = async (orderId: string) => {
     try {
-      await updateOrder(orderId, {
+      // 明示的にimplementationMonthのみを含むオブジェクトを作成
+      const updateData = {
         implementationMonth: editMonth[orderId]
-      });
+      };
+      
+      await updateOrder(orderId, updateData);
       setEditingOrder(null);
       loadData();
     } catch (error) {
@@ -74,14 +88,114 @@ const OrderManagement = () => {
     setEditingOrder(null);
   };
 
+  // フィルター処理
+  const filteredOrders = orders.filter(order => {
+    // 担当者フィルター
+    if (assigneeFilter && order.assigneeId !== assigneeFilter) return false;
+    
+    // 受注日フィルター（開始日）
+    if (startDateFilter) {
+      const project = projects.find(p => p.id === order.projectId);
+      if (!project?.orderDate) return false; // 受注日未設定は除外
+      const startDate = new Date(startDateFilter);
+      if (project.orderDate < startDate) return false;
+    }
+    
+    // 受注日フィルター（終了日）
+    if (endDateFilter) {
+      const project = projects.find(p => p.id === order.projectId);
+      if (!project?.orderDate) return false; // 受注日未設定は除外
+      const endDate = new Date(endDateFilter + 'T23:59:59');
+      if (project.orderDate > endDate) return false;
+    }
+    
+    // 提案メニューフィルター
+    if (proposalMenuFilter && order.proposalMenu !== proposalMenuFilter) return false;
+    
+    // 実施月フィルター
+    if (implementationMonthFilter && order.implementationMonth !== implementationMonthFilter) return false;
+    
+    return true;
+  });
+
   return (
     <div className="order-management">
       <h1>受注管理</h1>
       
+      <div className="filters" style={{ marginBottom: '20px', padding: '15px', background: '#f5f5f5', borderRadius: '8px' }}>
+        <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="filter-group">
+            <label style={{ marginRight: '5px' }}>担当者:</label>
+            <select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)}>
+              <option value="">全て</option>
+              {users.map(user => (
+                <option key={user.id} value={user.id}>{user.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="filter-group">
+            <label style={{ marginRight: '5px' }}>受注日:</label>
+            <input 
+              type="date" 
+              value={startDateFilter}
+              onChange={(e) => setStartDateFilter(e.target.value)}
+              style={{ marginRight: '5px' }}
+            />
+            〜
+            <input 
+              type="date" 
+              value={endDateFilter}
+              onChange={(e) => setEndDateFilter(e.target.value)}
+              style={{ marginLeft: '5px' }}
+            />
+          </div>
+          
+          <div className="filter-group">
+            <label style={{ marginRight: '5px' }}>提案メニュー:</label>
+            <select value={proposalMenuFilter} onChange={(e) => setProposalMenuFilter(e.target.value)}>
+              <option value="">全て</option>
+              {proposalMenus.map(menu => (
+                <option key={menu.id} value={menu.id}>{menu.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="filter-group">
+            <label style={{ marginRight: '5px' }}>実施月:</label>
+            <input 
+              type="month" 
+              value={implementationMonthFilter}
+              onChange={(e) => setImplementationMonthFilter(e.target.value)}
+            />
+          </div>
+          
+          <button 
+            className="btn btn-sm btn-secondary"
+            onClick={() => {
+              setAssigneeFilter('');
+              setStartDateFilter('');
+              setEndDateFilter('');
+              setProposalMenuFilter('');
+              setImplementationMonthFilter('');
+            }}
+          >
+            フィルタークリア
+          </button>
+        </div>
+      </div>
+      
       <div className="summary-stats">
         <div className="stat-card">
           <h3>受注件数</h3>
-          <div className="stat-value">{orders.length}件</div>
+          <div className="stat-value">
+            {filteredOrders.length}件
+            {assigneeFilter || startDateFilter || endDateFilter || proposalMenuFilter || implementationMonthFilter ? (
+              <span style={{ fontSize: '14px', color: '#666' }}>
+                （全{orders.length}件中）
+              </span>
+            ) : null}
+          </div>
           {orders.length === 0 && (
             <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
               コンソールでデバッグログを確認してください
@@ -96,7 +210,8 @@ const OrderManagement = () => {
             <tr>
               <th>受注した新規クライアント名</th>
               <th>担当者名</th>
-              <th>確定日</th>
+              <th>受注日</th>
+              <th>最終接触日</th>
               <th>提案メニュー</th>
               <th>実施月</th>
               <th>操作</th>
@@ -105,25 +220,27 @@ const OrderManagement = () => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} style={{ textAlign: 'center', padding: '40px' }}>
+                <td colSpan={7} style={{ textAlign: 'center', padding: '40px' }}>
                   読み込み中...
                 </td>
               </tr>
-            ) : orders.length === 0 ? (
+            ) : filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ textAlign: 'center', padding: '40px' }}>
-                  受注データがありません
+                <td colSpan={7} style={{ textAlign: 'center', padding: '40px' }}>
+                  {orders.length === 0 ? '受注データがありません' : 'フィルター条件に一致するデータがありません'}
                 </td>
               </tr>
             ) : (
-              orders.map((order) => {
+              filteredOrders.map((order) => {
                 const user = users.find(u => u.id === order.assigneeId);
                 const menu = proposalMenus.find(m => m.id === order.proposalMenu);
+                const project = projects.find(p => p.id === order.projectId);
                 return (
                   <tr key={order.id}>
                     <td>{order.clientName}</td>
                     <td>{user?.name || '-'}</td>
-                    <td>{order.orderDate.toLocaleDateString()}</td>
+                    <td>{project?.orderDate ? project.orderDate.toLocaleDateString() : '-'}</td>
+                    <td>{project?.lastContactDate ? project.lastContactDate.toLocaleDateString() : '-'}</td>
                     <td>{menu?.name || order.proposalMenu}</td>
                     <td>
                       {editingOrder === order.id ? (

@@ -30,7 +30,7 @@ const ProjectManagement = () => {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [editFormData, setEditFormData] = useState<Partial<Omit<Project, 'lastContactDate'>> & { lastContactDate?: string }>({});
+  const [editFormData, setEditFormData] = useState<Partial<Omit<Project, 'lastContactDate' | 'orderDate' | 'firstMeetingDate'>> & { lastContactDate?: string; orderDate?: string; firstMeetingDate?: string }>({});
   const [editProposalMenus, setEditProposalMenus] = useState<string[]>([]);
   const [isEditDropdownOpen, setIsEditDropdownOpen] = useState(false);
 
@@ -143,7 +143,9 @@ const ProjectManagement = () => {
     setSelectedProject(project);
     setEditFormData({
       ...project,
-      lastContactDate: project.lastContactDate ? project.lastContactDate.toISOString().split('T')[0] : ''
+      lastContactDate: project.lastContactDate ? project.lastContactDate.toISOString().split('T')[0] : '',
+      orderDate: project.orderDate ? project.orderDate.toISOString().split('T')[0] : '',
+      firstMeetingDate: project.firstMeetingDate ? project.firstMeetingDate.toISOString().split('T')[0] : ''
     });
     // 複数の提案メニューIDを設定
     setEditProposalMenus(project.proposalMenuIds || (project.proposalMenuId ? [project.proposalMenuId] : []));
@@ -217,6 +219,8 @@ const ProjectManagement = () => {
         assigneeId: editFormData.assigneeId || selectedProject.assigneeId,
         status: editFormData.status || selectedProject.status,
         lastContactDate: editFormData.lastContactDate ? new Date(editFormData.lastContactDate) : selectedProject.lastContactDate,
+        orderDate: editFormData.orderDate ? new Date(editFormData.orderDate) : selectedProject.orderDate,
+        firstMeetingDate: editFormData.firstMeetingDate ? new Date(editFormData.firstMeetingDate) : selectedProject.firstMeetingDate,
       };
 
       await updateProject(selectedProject.id, updatedData);
@@ -280,7 +284,7 @@ const ProjectManagement = () => {
   });
 
   const groupedClients = clients.map(client => {
-    const clientProjects = projects.filter(p => p.clientName === client.name);
+    const clientProjects = filteredProjects.filter(p => p.clientName === client.name);
     const latestProject = clientProjects.sort((a, b) => 
       (b.lastContactDate?.getTime() || 0) - (a.lastContactDate?.getTime() || 0)
     )[0];
@@ -316,7 +320,7 @@ const ProjectManagement = () => {
       lastContactDate: latestProject?.lastContactDate || null,
       assigneeName: users.find(u => u.id === latestProject?.assigneeId)?.name || ''
     };
-  });
+  }).filter(client => client.projectCount > 0);
 
   return (
     <div className="project-management">
@@ -378,6 +382,8 @@ const ProjectManagement = () => {
                 <th>担当者</th>
                 <th>ステータス</th>
                 <th>実績</th>
+                <th>初回商談日</th>
+                <th>受注日</th>
                 <th>最終接触日</th>
                 <th>アクション</th>
               </tr>
@@ -385,13 +391,13 @@ const ProjectManagement = () => {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '40px' }}>
+                  <td colSpan={10} style={{ textAlign: 'center', padding: '40px' }}>
                     読み込み中...
                   </td>
                 </tr>
               ) : filteredProjects.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '40px' }}>
+                  <td colSpan={10} style={{ textAlign: 'center', padding: '40px' }}>
                     案件がありません
                   </td>
                 </tr>
@@ -433,6 +439,13 @@ const ProjectManagement = () => {
                           {performanceType === 'unselected' && '未選択'}
                           {!performanceType && '-'}
                         </span>
+                      </td>
+                      <td>{project.firstMeetingDate?.toLocaleDateString() || '-'}</td>
+                      <td>
+                        {(project.status === 'won' || project.status === 'active' || project.status === 'completed') 
+                          ? (project.orderDate?.toLocaleDateString() || '-') 
+                          : '-'
+                        }
                       </td>
                       <td>{project.lastContactDate?.toLocaleDateString() || '-'}</td>
                       <td>
@@ -776,6 +789,24 @@ const ProjectManagement = () => {
                     <option value="active">稼働中</option>
                     <option value="completed">稼働終了</option>
                   </select>
+                </div>
+                
+                <div className="form-group">
+                  <label>初回商談日:</label>
+                  <input 
+                    type="date" 
+                    value={editFormData.firstMeetingDate || ''} 
+                    onChange={(e) => setEditFormData({...editFormData, firstMeetingDate: e.target.value})}
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label>受注日:</label>
+                  <input 
+                    type="date" 
+                    value={editFormData.orderDate || ''} 
+                    onChange={(e) => setEditFormData({...editFormData, orderDate: e.target.value})}
+                  />
                 </div>
                 
                 <div className="form-group">

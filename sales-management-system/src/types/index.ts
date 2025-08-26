@@ -43,6 +43,8 @@ export interface Project {
   status: 'proposal' | 'negotiation' | 'lost' | 'won' | 'active' | 'completed';
   createdAt: Date;
   lastContactDate?: Date;
+  orderDate?: Date; // 受注日
+  firstMeetingDate?: Date; // 初回商談日
 }
 
 export interface ActionLog {

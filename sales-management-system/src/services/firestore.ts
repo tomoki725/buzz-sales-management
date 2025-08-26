@@ -137,7 +137,9 @@ export const createProject = async (projectData: Omit<Project, 'id'>) => {
   const docRef = await addDoc(projectsCollection, {
     ...projectData,
     createdAt: Timestamp.fromDate(projectData.createdAt),
-    lastContactDate: projectData.lastContactDate ? Timestamp.fromDate(projectData.lastContactDate) : null
+    lastContactDate: projectData.lastContactDate ? Timestamp.fromDate(projectData.lastContactDate) : null,
+    orderDate: projectData.orderDate ? Timestamp.fromDate(projectData.orderDate) : null,
+    firstMeetingDate: projectData.firstMeetingDate ? Timestamp.fromDate(projectData.firstMeetingDate) : null
   });
   return docRef.id;
 };
@@ -150,17 +152,28 @@ export const getProjects = async (): Promise<Project[]> => {
       id: doc.id,
       ...data,
       createdAt: data.createdAt.toDate(),
-      lastContactDate: data.lastContactDate?.toDate() || null
+      lastContactDate: data.lastContactDate?.toDate() || null,
+      orderDate: data.orderDate?.toDate() || null,
+      firstMeetingDate: data.firstMeetingDate?.toDate() || null
     } as Project;
   });
 };
 
 export const updateProject = async (id: string, projectData: Partial<Project>) => {
   const docRef = doc(db, 'projects', id);
-  const updateData = {
-    ...projectData,
-    lastContactDate: projectData.lastContactDate ? Timestamp.fromDate(projectData.lastContactDate) : null
-  };
+  const updateData: any = { ...projectData };
+  
+  // Dateフィールドの変換処理
+  if (projectData.lastContactDate !== undefined) {
+    updateData.lastContactDate = projectData.lastContactDate ? Timestamp.fromDate(projectData.lastContactDate) : null;
+  }
+  if (projectData.orderDate !== undefined) {
+    updateData.orderDate = projectData.orderDate ? Timestamp.fromDate(projectData.orderDate) : null;
+  }
+  if (projectData.firstMeetingDate !== undefined) {
+    updateData.firstMeetingDate = projectData.firstMeetingDate ? Timestamp.fromDate(projectData.firstMeetingDate) : null;
+  }
+  
   await updateDoc(docRef, updateData);
 };
 
@@ -262,11 +275,37 @@ export const getOrders = async (): Promise<Order[]> => {
 
 export const updateOrder = async (id: string, orderData: Partial<Order>) => {
   const docRef = doc(db, 'orders', id);
-  const updateData = {
-    ...orderData,
-    orderDate: orderData.orderDate ? Timestamp.fromDate(orderData.orderDate) : undefined
-  };
-  await updateDoc(docRef, updateData);
+  const updateData: any = {};
+  
+  // Object.entriesを使用してより安全に処理
+  Object.entries(orderData).forEach(([key, value]) => {
+    // undefined、nullをスキップ
+    if (value === undefined || value === null) {
+      return;
+    }
+    
+    // idフィールドは更新対象から除外
+    if (key === 'id') {
+      return;
+    }
+    
+    // orderDateの場合はTimestamp変換
+    if (key === 'orderDate') {
+      if (value instanceof Date) {
+        updateData.orderDate = Timestamp.fromDate(value);
+      } else {
+        return;
+      }
+    } else {
+      // その他のフィールドはそのまま追加
+      updateData[key] = value;
+    }
+  });
+  
+  // 更新データが空でない場合のみ更新実行
+  if (Object.keys(updateData).length > 0) {
+    await updateDoc(docRef, updateData);
+  }
 };
 
 // Performance Collection

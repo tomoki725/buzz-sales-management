@@ -224,8 +224,15 @@ const Dashboard = () => {
       
       const newDealProjects = filteredProjects.filter(p => newClientsSet.has(p.clientName));
       const existingDealProjects = filteredProjects.filter(p => existingClientsSet.has(p.clientName));
-      const newOrderProjects = newDealProjects.filter(p => p.status === 'won');
-      const existingOrderProjects = existingDealProjects.filter(p => p.status === 'won');
+      
+      // 受注数は受注日ベースで計算（受注日未設定は除外）
+      const currentYear = new Date().getFullYear();
+      const newOrderProjects = newDealProjects.filter(p => 
+        p.status === 'won' && p.orderDate && p.orderDate.getFullYear() === currentYear
+      );
+      const existingOrderProjects = existingDealProjects.filter(p => 
+        p.status === 'won' && p.orderDate && p.orderDate.getFullYear() === currentYear
+      );
       
       // 2025年のデータのみを年間累計の対象とする
       const yearly2025Performance = filteredPerformance.filter(p => 
@@ -255,7 +262,7 @@ const Dashboard = () => {
       
       const kpiResult = {
         totalDeals: filteredLogs.length,
-        totalOrders: filteredProjects.filter(p => p.status === 'won').length,
+        totalOrders: (newOrderProjects.length + existingOrderProjects.length),
         newDeals: newDealProjects.length,
         newOrders: newOrderProjects.length,
         existingDeals: existingDealProjects.length,
@@ -295,7 +302,6 @@ const Dashboard = () => {
       setMonthlyData(chartData);
       
       // YOYデータ作成（2025年vs2024年の粗利比較）
-      const currentYear = 2025;
       const lastYear = 2024;
       const yoyMap = new Map<string, { current: number; last: number }>();
       
@@ -307,7 +313,7 @@ const Dashboard = () => {
       // 全体の実績データから2025年と2024年のデータを取得
       const yoyTargetData = performanceData.filter(p => {
         const year = parseInt(p.recordingMonth.substring(0, 4));
-        return year === currentYear || year === lastYear;
+        return year === 2025 || year === lastYear;
       });
       
       console.log('YOY対象データ数（2024年+2025年）:', yoyTargetData.length);
@@ -323,7 +329,7 @@ const Dashboard = () => {
           yoyMap.set(client, { current: 0, last: 0 });
         }
         const data = yoyMap.get(client)!;
-        if (year === currentYear) {
+        if (year === 2025) {
           data.current += p.grossProfit;
         } else {
           data.last += p.grossProfit;
@@ -651,8 +657,16 @@ const Dashboard = () => {
       
       const newDealProjects = monthlyProjects.filter(p => newClientsSet.has(p.clientName));
       const existingDealProjects = monthlyProjects.filter(p => existingClientsSet.has(p.clientName));
-      const newOrderProjects = newDealProjects.filter(p => p.status === 'won');
-      const existingOrderProjects = existingDealProjects.filter(p => p.status === 'won');
+      const newOrderProjects = newDealProjects.filter(p => 
+        p.status === 'won' && 
+        p.orderDate && 
+        p.orderDate.toISOString().substring(0, 7) === selectedMonth
+      );
+      const existingOrderProjects = existingDealProjects.filter(p => 
+        p.status === 'won' && 
+        p.orderDate && 
+        p.orderDate.toISOString().substring(0, 7) === selectedMonth
+      );
       
       // 月別の売上・粗利計算
       const totalRevenue = monthlyPerformance.reduce((sum, p) => sum + p.revenue, 0);
@@ -681,7 +695,11 @@ const Dashboard = () => {
       
       const monthlyKpiResult = {
         totalDeals: monthlyLogs.length,
-        totalOrders: monthlyProjects.filter(p => p.status === 'won').length,
+        totalOrders: monthlyProjects.filter(p => 
+          p.status === 'won' && 
+          p.orderDate && 
+          p.orderDate.toISOString().substring(0, 7) === selectedMonth
+        ).length,
         newDeals: newDealProjects.length,
         newOrders: newOrderProjects.length,
         existingDeals: existingDealProjects.length,
@@ -767,8 +785,16 @@ const Dashboard = () => {
       
       const newDealProjects = monthlyProjects.filter(p => newClientsSet.has(p.clientName));
       const existingDealProjects = monthlyProjects.filter(p => existingClientsSet.has(p.clientName));
-      const newOrderProjects = newDealProjects.filter(p => p.status === 'won');
-      const existingOrderProjects = existingDealProjects.filter(p => p.status === 'won');
+      const newOrderProjects = newDealProjects.filter(p => 
+        p.status === 'won' && 
+        p.orderDate && 
+        p.orderDate.toISOString().substring(0, 7) === selectedMonth
+      );
+      const existingOrderProjects = existingDealProjects.filter(p => 
+        p.status === 'won' && 
+        p.orderDate && 
+        p.orderDate.toISOString().substring(0, 7) === selectedMonth
+      );
       
       // 月別の売上・粗利計算
       const totalRevenue = monthlyPerformance.reduce((sum, p) => sum + p.revenue, 0);
@@ -783,7 +809,11 @@ const Dashboard = () => {
       
       const departmentMonthlyKpiResult = {
         totalDeals: monthlyLogs.length,
-        totalOrders: monthlyProjects.filter(p => p.status === 'won').length,
+        totalOrders: monthlyProjects.filter(p => 
+          p.status === 'won' && 
+          p.orderDate && 
+          p.orderDate.toISOString().substring(0, 7) === selectedMonth
+        ).length,
         newDeals: newDealProjects.length,
         newOrders: newOrderProjects.length,
         existingDeals: existingDealProjects.length,
