@@ -17,6 +17,14 @@ const ActionLogList = () => {
   const [showDetail, setShowDetail] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingLog, setEditingLog] = useState<ActionLog | null>(null);
+  
+  // フィルター用のstate
+  const [clientFilter, setClientFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [actionMonthFilter, setActionMonthFilter] = useState('');
+  const [nextActionMonthFilter, setNextActionMonthFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState('');
   const [editFormData, setEditFormData] = useState({
     title: '',
     status: '',
@@ -124,14 +132,140 @@ const ActionLogList = () => {
     }
   };
 
+  // フィルター処理
+  const filteredActionLogs = actionLogs.filter(log => {
+    const project = projects.find(p => p.id === log.projectId);
+    
+    // クライアントフィルター
+    if (clientFilter && !project?.clientName?.toLowerCase().includes(clientFilter.toLowerCase())) return false;
+    
+    // 案件フィルター
+    if (projectFilter) {
+      const projectTitle = project?.title || log.title;
+      if (!projectTitle.toLowerCase().includes(projectFilter.toLowerCase())) return false;
+    }
+    
+    // ステータスフィルター
+    if (statusFilter && log.status !== statusFilter) return false;
+    
+    // アクション月フィルター
+    if (actionMonthFilter && log.actionDate.toISOString().substring(0, 7) !== actionMonthFilter) return false;
+    
+    // 次回アクション月フィルター
+    if (nextActionMonthFilter) {
+      if (!log.nextActionDate || log.nextActionDate.toISOString().substring(0, 7) !== nextActionMonthFilter) return false;
+    }
+    
+    // 担当者フィルター
+    if (assigneeFilter && log.assigneeId !== assigneeFilter) return false;
+    
+    return true;
+  });
+
   return (
     <div className="action-log-list">
       <h1>アクションログ</h1>
       
+      <div className="filters" style={{ marginBottom: '20px', padding: '15px', background: '#f5f5f5', borderRadius: '8px' }}>
+        <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="filter-group">
+            <label style={{ marginRight: '5px' }}>クライアント:</label>
+            <input 
+              type="text" 
+              value={clientFilter}
+              onChange={(e) => setClientFilter(e.target.value)}
+              placeholder="クライアント名で検索"
+              style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ccc' }}
+            />
+          </div>
+          
+          <div className="filter-group">
+            <label style={{ marginRight: '5px' }}>案件:</label>
+            <input 
+              type="text" 
+              value={projectFilter}
+              onChange={(e) => setProjectFilter(e.target.value)}
+              placeholder="案件名で検索"
+              style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ccc' }}
+            />
+          </div>
+          
+          <div className="filter-group">
+            <label style={{ marginRight: '5px' }}>ステータス:</label>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="">全て</option>
+              <option value="proposal">提案中</option>
+              <option value="negotiation">交渉中</option>
+              <option value="won">受注</option>
+              <option value="lost">失注</option>
+              <option value="active">稼働中</option>
+              <option value="completed">稼働終了</option>
+            </select>
+          </div>
+          
+          <div className="filter-group">
+            <label style={{ marginRight: '5px' }}>アクション月:</label>
+            <input 
+              type="month" 
+              value={actionMonthFilter}
+              onChange={(e) => setActionMonthFilter(e.target.value)}
+            />
+          </div>
+          
+          <div className="filter-group">
+            <label style={{ marginRight: '5px' }}>次回アクション月:</label>
+            <input 
+              type="month" 
+              value={nextActionMonthFilter}
+              onChange={(e) => setNextActionMonthFilter(e.target.value)}
+            />
+          </div>
+          
+          <div className="filter-group">
+            <label style={{ marginRight: '5px' }}>担当者:</label>
+            <select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)}>
+              <option value="">全て</option>
+              {users.map(user => (
+                <option key={user.id} value={user.id}>{user.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          <button 
+            className="btn btn-sm btn-secondary"
+            onClick={() => {
+              setClientFilter('');
+              setProjectFilter('');
+              setStatusFilter('');
+              setActionMonthFilter('');
+              setNextActionMonthFilter('');
+              setAssigneeFilter('');
+            }}
+          >
+            フィルタークリア
+          </button>
+        </div>
+      </div>
+      
+      <div className="summary-stats" style={{ marginBottom: '20px' }}>
+        <div className="stat-card">
+          <h3>アクションログ件数</h3>
+          <div className="stat-value">
+            {filteredActionLogs.length}件
+            {(clientFilter || projectFilter || statusFilter || actionMonthFilter || nextActionMonthFilter || assigneeFilter) ? (
+              <span style={{ fontSize: '14px', color: '#666' }}>
+                （全{actionLogs.length}件中）
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
       <div className="card">
         <table className="table">
           <thead>
             <tr>
+              <th>クライアント</th>
               <th>案件</th>
               <th>ステータス</th>
               <th>アクション日</th>
@@ -143,22 +277,23 @@ const ActionLogList = () => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} style={{ textAlign: 'center', padding: '40px' }}>
+                <td colSpan={7} style={{ textAlign: 'center', padding: '40px' }}>
                   読み込み中...
                 </td>
               </tr>
-            ) : actionLogs.length === 0 ? (
+            ) : filteredActionLogs.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ textAlign: 'center', padding: '40px' }}>
-                  アクションログがありません
+                <td colSpan={7} style={{ textAlign: 'center', padding: '40px' }}>
+                  {actionLogs.length === 0 ? 'アクションログがありません' : 'フィルター条件に一致するデータがありません'}
                 </td>
               </tr>
             ) : (
-              actionLogs.map((log) => {
+              filteredActionLogs.map((log) => {
                 const project = projects.find(p => p.id === log.projectId);
                 const user = users.find(u => u.id === log.assigneeId);
                 return (
                   <tr key={log.id}>
+                    <td>{project?.clientName || '-'}</td>
                     <td>{project?.title || log.title}</td>
                     <td>
                       <span className={`status status-${log.status}`}>

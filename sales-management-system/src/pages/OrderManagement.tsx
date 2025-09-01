@@ -4,15 +4,17 @@ import {
   getUsers,
   getProposalMenus,
   updateOrder,
-  getProjects
+  getProjects,
+  getClients
 } from '../services/firestore';
-import type { Order, User, ProposalMenu, Project } from '../types';
+import type { Order, User, ProposalMenu, Project, Client } from '../types';
 
 const OrderManagement = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [proposalMenus, setProposalMenus] = useState<ProposalMenu[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingOrder, setEditingOrder] = useState<string | null>(null);
   const [editMonth, setEditMonth] = useState<{ [key: string]: string }>({});
@@ -31,11 +33,12 @@ const OrderManagement = () => {
   const loadData = async () => {
     try {
       console.log('=== 受注管理データ読み込み開始 ===');
-      const [ordersData, usersData, menusData, projectsData] = await Promise.all([
+      const [ordersData, usersData, menusData, projectsData, clientsData] = await Promise.all([
         getOrders(),
         getUsers(),
         getProposalMenus(),
-        getProjects()
+        getProjects(),
+        getClients()
       ]);
       console.log('取得した受注データ:', ordersData);
       console.log('受注データ件数:', ordersData.length);
@@ -44,6 +47,7 @@ const OrderManagement = () => {
       setUsers(usersData);
       setProposalMenus(menusData);
       setProjects(projectsData);
+      setClients(clientsData);
       
       // 実施月の初期値を設定
       const monthValues: { [key: string]: string } = {};
@@ -86,6 +90,13 @@ const OrderManagement = () => {
       }));
     }
     setEditingOrder(null);
+  };
+
+  // クライアントタイプを判定する関数
+  const getClientType = (clientName: string): 'new' | 'existing' | '-' => {
+    const client = clients.find(c => c.name === clientName);
+    if (!client) return '-';
+    return client.status === 'new' ? 'new' : 'existing';
   };
 
   // フィルター処理
@@ -208,7 +219,8 @@ const OrderManagement = () => {
         <table className="table">
           <thead>
             <tr>
-              <th>受注した新規クライアント名</th>
+              <th>受注したクライアント名</th>
+              <th>区分</th>
               <th>担当者名</th>
               <th>受注日</th>
               <th>最終接触日</th>
@@ -220,13 +232,13 @@ const OrderManagement = () => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '40px' }}>
+                <td colSpan={8} style={{ textAlign: 'center', padding: '40px' }}>
                   読み込み中...
                 </td>
               </tr>
             ) : filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '40px' }}>
+                <td colSpan={8} style={{ textAlign: 'center', padding: '40px' }}>
                   {orders.length === 0 ? '受注データがありません' : 'フィルター条件に一致するデータがありません'}
                 </td>
               </tr>
@@ -235,9 +247,23 @@ const OrderManagement = () => {
                 const user = users.find(u => u.id === order.assigneeId);
                 const menu = proposalMenus.find(m => m.id === order.proposalMenu);
                 const project = projects.find(p => p.id === order.projectId);
+                const clientType = getClientType(order.clientName);
                 return (
                   <tr key={order.id}>
                     <td>{order.clientName}</td>
+                    <td>
+                      <span 
+                        className={`badge ${
+                          clientType === 'new' ? 'badge-success' : 
+                          clientType === 'existing' ? 'badge-primary' : 
+                          'badge-secondary'
+                        }`}
+                      >
+                        {clientType === 'new' ? '新規' : 
+                         clientType === 'existing' ? '既存' : 
+                         '-'}
+                      </span>
+                    </td>
                     <td>{user?.name || '-'}</td>
                     <td>{project?.orderDate ? project.orderDate.toLocaleDateString() : '-'}</td>
                     <td>{project?.lastContactDate ? project.lastContactDate.toLocaleDateString() : '-'}</td>

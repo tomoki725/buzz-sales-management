@@ -256,6 +256,9 @@ export const createOrder = async (orderData: Omit<Order, 'id'>) => {
   if (orderData.grossProfit !== undefined) {
     cleanData.grossProfit = orderData.grossProfit;
   }
+  if (orderData.clientType !== undefined) {
+    cleanData.clientType = orderData.clientType;
+  }
   
   const docRef = await addDoc(ordersCollection, cleanData);
   return docRef.id;

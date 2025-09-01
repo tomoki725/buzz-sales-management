@@ -75,6 +75,7 @@ export interface Order {
   revenue?: number;
   cost?: number;
   grossProfit?: number;
+  clientType?: 'new' | 'existing' | '-';
 }
 
 export interface Performance {

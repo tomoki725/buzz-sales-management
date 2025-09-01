@@ -4,7 +4,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, LabelList 
 } from 'recharts';
 import { 
-  getProjects, getActionLogs, getPerformance, 
+  getProjects, getPerformance, 
   getClients, getUsers, getSalesTargets,
   createSalesTarget, updateSalesTarget
 } from '../services/firestore';
@@ -161,9 +161,8 @@ const Dashboard = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [projectsData, logsData, performanceData, clientsData, usersData] = await Promise.all([
+      const [projectsData, performanceData, clientsData, usersData] = await Promise.all([
         getProjects(),
-        getActionLogs(),
         getPerformance(),
         getClients(),
         getUsers()
@@ -186,12 +185,10 @@ const Dashboard = () => {
       console.log('全体実績データ数:', performanceData.length);
       
       let filteredProjects = projectsData;
-      let filteredLogs = logsData;
       let filteredPerformance = performanceData;
       
       if (activeTab === 'personal' && selectedUser) {
         filteredProjects = projectsData.filter(p => p.assigneeId === selectedUser);
-        filteredLogs = logsData.filter(l => l.assigneeId === selectedUser);
         // 実績データも担当者でフィルタリング（直接assigneeIdを使用）
         filteredPerformance = performanceData.filter(perf => perf.assigneeId === selectedUser);
         console.log('個人タブ: 担当者フィルタ後の実績データ数:', filteredPerformance.length);
@@ -199,11 +196,9 @@ const Dashboard = () => {
         // 部署別フィルタリング
         const departmentUserIds = usersData.filter(u => u.department === selectedDepartment).map(u => u.id);
         filteredProjects = projectsData.filter(p => departmentUserIds.includes(p.assigneeId));
-        filteredLogs = logsData.filter(l => departmentUserIds.includes(l.assigneeId));
         filteredPerformance = performanceData.filter(perf => departmentUserIds.includes(perf.assigneeId));
         console.log('部署タブ: 部署フィルタ後のデータ数:', {
           projects: filteredProjects.length,
-          logs: filteredLogs.length,
           performance: filteredPerformance.length
         });
       } else {
@@ -261,7 +256,7 @@ const Dashboard = () => {
       const averageOrderValue = activeClients > 0 ? totalGrossProfit / activeClients : 0;
       
       const kpiResult = {
-        totalDeals: filteredLogs.length,
+        totalDeals: filteredProjects.length,
         totalOrders: (newOrderProjects.length + existingOrderProjects.length),
         newDeals: newDealProjects.length,
         newOrders: newOrderProjects.length,
@@ -503,28 +498,24 @@ const Dashboard = () => {
         const oneMonthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
         
         // アラート対象クライアントのフィルタリング
-        // 1. アクションログが存在するクライアントを取得
-        const clientsWithActionLogs = new Set();
-        logsData.forEach(log => {
-          const project = projectsData.find(p => p.id === log.projectId);
-          if (project) {
-            clientsWithActionLogs.add(project.clientName);
-          }
-        });
+        // プロジェクトが存在するクライアントを取得
+        const clientsWithProjects = new Set(
+          projectsData.map(p => p.clientName)
+        );
         
-        // 2. 2025年7月以降に実績があるクライアントを取得
+        // 2025年7月以降に実績があるクライアントを取得
         const clientsWithRecentPerformance = new Set(
           performanceData
             .filter(p => p.recordingMonth >= '2025-07')
             .map(p => p.clientName)
         );
         
-        // 3. 両方の条件を満たすクライアントのみを対象とする
-        const targetClients = Array.from(clientsWithActionLogs).filter((clientName): clientName is string => 
+        // 両方の条件を満たすクライアントのみを対象とする
+        const targetClients = Array.from(clientsWithProjects).filter((clientName): clientName is string => 
           typeof clientName === 'string' && clientsWithRecentPerformance.has(clientName)
         );
         
-        console.log('アクションログがあるクライアント数:', clientsWithActionLogs.size);
+        console.log('プロジェクトがあるクライアント数:', clientsWithProjects.size);
         console.log('2025年7月以降実績があるクライアント数:', clientsWithRecentPerformance.size);
         console.log('アラート対象クライアント数:', targetClients.length);
         console.log('対象クライアント:', targetClients);
@@ -551,23 +542,26 @@ const Dashboard = () => {
             });
           }
           
-          // 1ヶ月以上アクションログがないクライアントをチェック
+          // 1ヶ月以上最終接触日が更新されていないクライアントをチェック
           const clientProjects = projectsData.filter(p => p.clientName === clientName);
-          const clientProjectIds = clientProjects.map(p => p.id);
-          const clientLogs = logsData.filter(log => clientProjectIds.includes(log.projectId));
-          const latestLog = clientLogs
-            .sort((a, b) => new Date(b.actionDate).getTime() - new Date(a.actionDate).getTime())[0];
+          const latestProject = clientProjects
+            .filter(p => p.lastContactDate)
+            .sort((a, b) => {
+              const dateA = a.lastContactDate ? new Date(a.lastContactDate).getTime() : 0;
+              const dateB = b.lastContactDate ? new Date(b.lastContactDate).getTime() : 0;
+              return dateB - dateA;
+            })[0];
           
-          if (clientLogs.length === 0 || 
-              (latestLog && new Date(latestLog.actionDate) < oneMonthAgo)) {
+          if (!latestProject || 
+              (latestProject.lastContactDate && new Date(latestProject.lastContactDate) < oneMonthAgo)) {
             const alertId = `action-${clientName}`;
-            const lastDate = latestLog ? new Date(latestLog.actionDate) : new Date(0);
+            const lastDate = latestProject?.lastContactDate ? new Date(latestProject.lastContactDate) : new Date(0);
             
             generatedAlerts.push({
               id: alertId,
               type: 'action',
               clientName,
-              message: '1ヶ月以上アクションログが追加されていません',
+              message: '1ヶ月以上接触がありません',
               severity: 'warning',
               lastDate,
               dismissed: false
@@ -597,9 +591,8 @@ const Dashboard = () => {
     console.log('選択されたユーザー:', selectedUser);
     
     try {
-      const [projectsData, logsData, performanceData, clientsData] = await Promise.all([
+      const [projectsData, performanceData, clientsData] = await Promise.all([
         getProjects(),
-        getActionLogs(),
         getPerformance(),
         getClients()
       ]);
@@ -609,12 +602,10 @@ const Dashboard = () => {
       
       // フィルタリング
       let filteredProjects = projectsData;
-      let filteredLogs = logsData;
       let filteredPerformance = performanceData;
       
       if (activeTab === 'personal' && selectedUser) {
         filteredProjects = projectsData.filter(p => p.assigneeId === selectedUser);
-        filteredLogs = logsData.filter(l => l.assigneeId === selectedUser);
         // 実績データも担当者でフィルタリング（直接assigneeIdを使用）
         filteredPerformance = performanceData.filter(perf => perf.assigneeId === selectedUser);
       }
@@ -631,17 +622,17 @@ const Dashboard = () => {
       console.log('月別フィルタリング後のデータ数:', monthlyPerformance.length);
       console.log('月別データ:', monthlyPerformance);
       
-      // 月別の商談・受注データをフィルタリング（作成日または最終接触日が選択月の場合）
+      // 月別の商談・受注データをフィルタリング
       const monthlyProjects = filteredProjects.filter(p => {
+        // 初回商談日ベースで判定
+        if (p.firstMeetingDate) {
+          return p.firstMeetingDate.toISOString().substring(0, 7) === selectedMonth;
+        }
+        // 初回商談日が未設定の場合は作成日で判定
         const createdMonth = p.createdAt.toISOString().substring(0, 7);
-        const lastContactMonth = p.lastContactDate?.toISOString().substring(0, 7);
-        return createdMonth === selectedMonth || lastContactMonth === selectedMonth;
+        return createdMonth === selectedMonth;
       });
       
-      const monthlyLogs = filteredLogs.filter(l => {
-        const actionMonth = l.actionDate.toISOString().substring(0, 7);
-        return actionMonth === selectedMonth;
-      });
       
       // KPI計算
       const newClientsSet = new Set<string>();
@@ -658,14 +649,10 @@ const Dashboard = () => {
       const newDealProjects = monthlyProjects.filter(p => newClientsSet.has(p.clientName));
       const existingDealProjects = monthlyProjects.filter(p => existingClientsSet.has(p.clientName));
       const newOrderProjects = newDealProjects.filter(p => 
-        p.status === 'won' && 
-        p.orderDate && 
-        p.orderDate.toISOString().substring(0, 7) === selectedMonth
+        p.status === 'won'
       );
       const existingOrderProjects = existingDealProjects.filter(p => 
-        p.status === 'won' && 
-        p.orderDate && 
-        p.orderDate.toISOString().substring(0, 7) === selectedMonth
+        p.status === 'won'
       );
       
       // 月別の売上・粗利計算
@@ -694,7 +681,7 @@ const Dashboard = () => {
       const averageOrderValue = activeClients > 0 ? totalGrossProfit / activeClients : 0;
       
       const monthlyKpiResult = {
-        totalDeals: monthlyLogs.length,
+        totalDeals: monthlyProjects.length,
         totalOrders: monthlyProjects.filter(p => 
           p.status === 'won' && 
           p.orderDate && 
@@ -740,9 +727,8 @@ const Dashboard = () => {
     console.log('選択された部署:', selectedDepartment);
     
     try {
-      const [projectsData, logsData, performanceData, clientsData, usersData] = await Promise.all([
+      const [projectsData, performanceData, clientsData, usersData] = await Promise.all([
         getProjects(),
-        getActionLogs(),
         getPerformance(),
         getClients(),
         getUsers()
@@ -753,7 +739,6 @@ const Dashboard = () => {
       
       // 部署でフィルタリング
       let filteredProjects = projectsData.filter(p => departmentUserIds.includes(p.assigneeId));
-      let filteredLogs = logsData.filter(l => departmentUserIds.includes(l.assigneeId));
       let filteredPerformance = performanceData.filter(perf => departmentUserIds.includes(perf.assigneeId));
       
       // 選択された月のデータのみにフィルタリング
@@ -761,15 +746,15 @@ const Dashboard = () => {
       
       // 月別の商談・受注データをフィルタリング
       const monthlyProjects = filteredProjects.filter(p => {
+        // 初回商談日ベースで判定
+        if (p.firstMeetingDate) {
+          return p.firstMeetingDate.toISOString().substring(0, 7) === selectedMonth;
+        }
+        // 初回商談日が未設定の場合は作成日で判定
         const createdMonth = p.createdAt.toISOString().substring(0, 7);
-        const lastContactMonth = p.lastContactDate?.toISOString().substring(0, 7);
-        return createdMonth === selectedMonth || lastContactMonth === selectedMonth;
+        return createdMonth === selectedMonth;
       });
       
-      const monthlyLogs = filteredLogs.filter(l => {
-        const actionMonth = l.actionDate.toISOString().substring(0, 7);
-        return actionMonth === selectedMonth;
-      });
       
       // KPI計算
       const newClientsSet = new Set<string>();
@@ -786,14 +771,10 @@ const Dashboard = () => {
       const newDealProjects = monthlyProjects.filter(p => newClientsSet.has(p.clientName));
       const existingDealProjects = monthlyProjects.filter(p => existingClientsSet.has(p.clientName));
       const newOrderProjects = newDealProjects.filter(p => 
-        p.status === 'won' && 
-        p.orderDate && 
-        p.orderDate.toISOString().substring(0, 7) === selectedMonth
+        p.status === 'won'
       );
       const existingOrderProjects = existingDealProjects.filter(p => 
-        p.status === 'won' && 
-        p.orderDate && 
-        p.orderDate.toISOString().substring(0, 7) === selectedMonth
+        p.status === 'won'
       );
       
       // 月別の売上・粗利計算
@@ -808,12 +789,9 @@ const Dashboard = () => {
       const averageOrderValue = activeClients > 0 ? totalGrossProfit / activeClients : 0;
       
       const departmentMonthlyKpiResult = {
-        totalDeals: monthlyLogs.length,
-        totalOrders: monthlyProjects.filter(p => 
-          p.status === 'won' && 
-          p.orderDate && 
-          p.orderDate.toISOString().substring(0, 7) === selectedMonth
-        ).length,
+        totalDeals: monthlyProjects.length,
+        // monthlyProjectsは既にorderDateでフィルタリング済みなのでstatusチェックのみ
+        totalOrders: monthlyProjects.filter(p => p.status === 'won').length,
         newDeals: newDealProjects.length,
         newOrders: newOrderProjects.length,
         existingDeals: existingDealProjects.length,

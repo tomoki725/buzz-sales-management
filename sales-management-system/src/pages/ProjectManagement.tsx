@@ -24,7 +24,12 @@ const ProjectManagement = () => {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [performanceFilter, setPerformanceFilter] = useState('');
   const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
+  
+  // ソート機能用の状態
+  const [sortField, setSortField] = useState<'firstMeetingDate' | 'orderDate' | 'lastContactDate' | null>(null);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   
   // モーダル関連の状態
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -94,6 +99,13 @@ const ProjectManagement = () => {
           
           console.log('提案メニュー名:', proposalMenuNames);
           
+          // クライアントタイプを判定
+          const allClients = await getClients();
+          const client = allClients.find(c => c.name === project.clientName);
+          const clientType: 'new' | 'existing' | '-' = client 
+            ? (client.status === 'new' ? 'new' : 'existing')
+            : '-';
+
           // 受注データを作成
           const orderData: any = {
             projectId: project.id,
@@ -102,7 +114,8 @@ const ProjectManagement = () => {
             projectTitle: project.title || project.productName || 'タイトル未設定',
             assigneeId: project.assigneeId,
             orderDate: new Date(),
-            proposalMenu: proposalMenuNames
+            proposalMenu: proposalMenuNames,
+            clientType: clientType
             // implementationMonth, revenue, cost, grossProfit は undefined なので省略
           };
           
@@ -277,10 +290,49 @@ const ProjectManagement = () => {
     });
   };
 
+  // ソート関数
+  const handleSort = (field: 'firstMeetingDate' | 'orderDate' | 'lastContactDate') => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
   const filteredProjects = projects.filter(project => {
     if (statusFilter && project.status !== statusFilter) return false;
     if (assigneeFilter && project.assigneeId !== assigneeFilter) return false;
+    
+    // 実績フィルター
+    if (performanceFilter) {
+      const latestActionLog = actionLogs
+        .filter(log => log.projectId === project.id)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+      const performanceType = latestActionLog?.performanceType;
+      
+      if (performanceType !== performanceFilter) return false;
+    }
+    
     return true;
+  });
+
+  // ソート済みプロジェクト
+  const sortedProjects = [...filteredProjects].sort((a, b) => {
+    if (!sortField) return 0;
+    
+    const dateA = a[sortField];
+    const dateB = b[sortField];
+    
+    // null/undefined値の処理（nullは最後に表示）
+    if (!dateA && !dateB) return 0;
+    if (!dateA) return 1;
+    if (!dateB) return -1;
+    
+    const timeA = dateA.getTime();
+    const timeB = dateB.getTime();
+    
+    return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
   });
 
   const groupedClients = clients.map(client => {
@@ -369,6 +421,15 @@ const ProjectManagement = () => {
             ))}
           </select>
         </div>
+        <div className="filter-group">
+          <label>実績:</label>
+          <select value={performanceFilter} onChange={(e) => setPerformanceFilter(e.target.value)}>
+            <option value="">全て</option>
+            <option value="new">新規</option>
+            <option value="existing">既存</option>
+            <option value="unselected">未選択</option>
+          </select>
+        </div>
       </div>
 
       {activeTab === 'project' && (
@@ -382,9 +443,33 @@ const ProjectManagement = () => {
                 <th>担当者</th>
                 <th>ステータス</th>
                 <th>実績</th>
-                <th>初回商談日</th>
-                <th>受注日</th>
-                <th>最終接触日</th>
+                <th 
+                  onClick={() => handleSort('firstMeetingDate')} 
+                  style={{cursor: 'pointer'}}
+                >
+                  初回商談日 
+                  <span className="sort-indicator">
+                    {sortField === 'firstMeetingDate' ? (sortOrder === 'asc' ? '▲' : '▼') : '△'}
+                  </span>
+                </th>
+                <th 
+                  onClick={() => handleSort('orderDate')} 
+                  style={{cursor: 'pointer'}}
+                >
+                  受注日 
+                  <span className="sort-indicator">
+                    {sortField === 'orderDate' ? (sortOrder === 'asc' ? '▲' : '▼') : '△'}
+                  </span>
+                </th>
+                <th 
+                  onClick={() => handleSort('lastContactDate')} 
+                  style={{cursor: 'pointer'}}
+                >
+                  最終接触日 
+                  <span className="sort-indicator">
+                    {sortField === 'lastContactDate' ? (sortOrder === 'asc' ? '▲' : '▼') : '△'}
+                  </span>
+                </th>
                 <th>アクション</th>
               </tr>
             </thead>
@@ -395,14 +480,14 @@ const ProjectManagement = () => {
                     読み込み中...
                   </td>
                 </tr>
-              ) : filteredProjects.length === 0 ? (
+              ) : sortedProjects.length === 0 ? (
                 <tr>
                   <td colSpan={10} style={{ textAlign: 'center', padding: '40px' }}>
                     案件がありません
                   </td>
                 </tr>
               ) : (
-                filteredProjects.map((project) => {
+                sortedProjects.map((project) => {
                   const user = users.find(u => u.id === project.assigneeId);
                   const proposalMenuNames = project.proposalMenuIds 
                     ? project.proposalMenuIds
@@ -1112,6 +1197,16 @@ const ProjectManagement = () => {
           font-weight: 600;
           font-size: 16px;
           color: #333;
+        }
+        
+        .sort-indicator {
+          margin-left: 5px;
+          color: #666;
+          user-select: none;
+        }
+
+        th[style*="cursor: pointer"]:hover {
+          background-color: #f5f5f5;
         }
         
         .project-count {

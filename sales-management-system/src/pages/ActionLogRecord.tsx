@@ -74,6 +74,13 @@ const ActionLogRecord = () => {
         return;
       }
 
+      // クライアントタイプを判定
+      const clients = await getClients();
+      const client = clients.find(c => c.name === projectData.clientName);
+      const clientType: 'new' | 'existing' | '-' = client 
+        ? (client.status === 'new' ? 'new' : 'existing')
+        : '-';
+
       // 受注データを作成
       const proposalMenuNames = projectData.proposalMenuIds 
         ? projectData.proposalMenuIds
@@ -89,7 +96,8 @@ const ActionLogRecord = () => {
         projectTitle: projectData.title || projectData.productName || 'タイトル未設定',
         assigneeId: projectData.assigneeId,
         orderDate: new Date(),
-        proposalMenu: proposalMenuNames
+        proposalMenu: proposalMenuNames,
+        clientType: clientType
         // implementationMonth, revenue, cost, grossProfit は undefined なので省略
       };
 
