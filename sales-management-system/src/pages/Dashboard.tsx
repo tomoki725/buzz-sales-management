@@ -62,7 +62,8 @@ const Dashboard = () => {
     totalRevenue: 0,
     totalGrossProfit: 0,
     activeClients: 0,
-    averageOrderValue: 0
+    averageOrderValue: 0,
+    retentionRate: 0
   });
   
   // 部署別KPI用
@@ -117,6 +118,114 @@ const Dashboard = () => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   
+  // 月別クライアント実績詳細
+  const [monthlyClientDetails, setMonthlyClientDetails] = useState<{
+    clientName: string;
+    projectName: string;
+    grossProfit: number;
+  }[]>([]);
+  const [monthlyClientDetailsLoading, setMonthlyClientDetailsLoading] = useState(false);
+  
+  // 継続率計算関数
+  const calculateRetentionRate = (
+    performanceData: any[],
+    selectedMonth: string,
+    assigneeId?: string
+  ): number => {
+    // 選択月の日付を取得
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const selectedDate = new Date(year, month - 1);
+    
+    // 過去3ヶ月の開始日を計算
+    const threeMonthsAgo = new Date(selectedDate.getFullYear(), selectedDate.getMonth() - 2, 1);
+    const threeMonthsAgoStr = `${threeMonthsAgo.getFullYear()}-${String(threeMonthsAgo.getMonth() + 1).padStart(2, '0')}`;
+    
+    // 担当者でフィルタリング（個人タブの場合）
+    let filteredData = performanceData;
+    if (assigneeId) {
+      filteredData = performanceData.filter(p => p.assigneeId === assigneeId);
+    }
+    
+    // 2025年1月から選択月までの全期間のユニーククライアント
+    const allTimeClients = new Set<string>();
+    filteredData.forEach(p => {
+      const perfMonth = p.recordingMonth.substring(0, 7);
+      if (perfMonth >= '2025-01' && perfMonth <= selectedMonth) {
+        if (p.grossProfit > 0) {
+          allTimeClients.add(p.clientName);
+        }
+      }
+    });
+    
+    // 過去3ヶ月以内のユニーククライアント
+    const recentClients = new Set<string>();
+    filteredData.forEach(p => {
+      const perfMonth = p.recordingMonth.substring(0, 7);
+      if (perfMonth >= threeMonthsAgoStr && perfMonth <= selectedMonth) {
+        if (p.grossProfit > 0) {
+          recentClients.add(p.clientName);
+        }
+      }
+    });
+    
+    // 継続率計算
+    if (allTimeClients.size === 0) return 0;
+    const retentionRate = (recentClients.size / allTimeClients.size) * 100;
+    
+    console.log('継続率計算:', {
+      selectedMonth,
+      threeMonthsAgoStr,
+      allTimeClients: Array.from(allTimeClients),
+      recentClients: Array.from(recentClients),
+      retentionRate: Math.round(retentionRate * 10) / 10
+    });
+    
+    return Math.round(retentionRate * 10) / 10; // 小数点第1位まで
+  };
+  
+  // 月別クライアント実績詳細データ取得
+  const loadMonthlyClientDetails = async () => {
+    if (!selectedUser || !selectedMonth) {
+      setMonthlyClientDetails([]);
+      return;
+    }
+    
+    setMonthlyClientDetailsLoading(true);
+    try {
+      const performanceData = await getPerformance();
+      
+      // 選択された担当者と月でフィルタリング
+      const filteredPerformance = performanceData.filter(p => 
+        p.assigneeId === selectedUser && 
+        p.recordingMonth.startsWith(selectedMonth) &&
+        p.grossProfit > 0
+      );
+      
+      // クライアント、案件、粗利でマッピング
+      const clientDetails = filteredPerformance.map(p => ({
+        clientName: p.clientName,
+        projectName: p.projectName,
+        grossProfit: p.grossProfit
+      }));
+      
+      // 粗利降順でソート
+      clientDetails.sort((a, b) => b.grossProfit - a.grossProfit);
+      
+      console.log('月別クライアント実績詳細:', {
+        selectedUser,
+        selectedMonth,
+        filteredCount: filteredPerformance.length,
+        details: clientDetails
+      });
+      
+      setMonthlyClientDetails(clientDetails);
+    } catch (error) {
+      console.error('Error loading monthly client details:', error);
+      setMonthlyClientDetails([]);
+    }
+    setMonthlyClientDetailsLoading(false);
+  };
+  
   useEffect(() => {
     loadData();
   }, [activeTab, selectedUser, selectedDepartment]);
@@ -157,6 +266,13 @@ const Dashboard = () => {
       setDismissedAlerts(new Set(JSON.parse(dismissed)));
     }
   }, []);
+  
+  // 月別クライアント実績詳細の読み込み
+  useEffect(() => {
+    if (activeTab === 'personal') {
+      loadMonthlyClientDetails();
+    }
+  }, [selectedUser, selectedMonth, activeTab]);
   
   const loadData = async () => {
     setLoading(true);
@@ -680,6 +796,13 @@ const Dashboard = () => {
       // 客単価
       const averageOrderValue = activeClients > 0 ? totalGrossProfit / activeClients : 0;
       
+      // 継続率計算
+      const retentionRate = calculateRetentionRate(
+        performanceData,
+        selectedMonth,
+        activeTab === 'personal' ? selectedUser : undefined
+      );
+      
       const monthlyKpiResult = {
         totalDeals: monthlyProjects.length,
         totalOrders: monthlyProjects.filter(p => 
@@ -694,7 +817,8 @@ const Dashboard = () => {
         totalRevenue,
         totalGrossProfit,
         activeClients,
-        averageOrderValue
+        averageOrderValue,
+        retentionRate
       };
       
       console.log('月別KPI結果:', monthlyKpiResult);
@@ -713,7 +837,8 @@ const Dashboard = () => {
         totalRevenue: 0,
         totalGrossProfit: 0,
         activeClients: 0,
-        averageOrderValue: 0
+        averageOrderValue: 0,
+        retentionRate: 0
       });
     }
   };
@@ -1119,6 +1244,10 @@ const Dashboard = () => {
                 <div className="kpi-value">{monthlyKpiData.activeClients}</div>
               </div>
               <div className="kpi-card">
+                <h3>継続率</h3>
+                <div className="kpi-value">{monthlyKpiData.retentionRate}%</div>
+              </div>
+              <div className="kpi-card">
                 <h3>客単価</h3>
                 <div className="kpi-value">¥{Math.round(monthlyKpiData.averageOrderValue).toLocaleString()}</div>
               </div>
@@ -1327,6 +1456,10 @@ const Dashboard = () => {
               <div className="kpi-value">{monthlyKpiData.activeClients}</div>
             </div>
             <div className="kpi-card">
+              <h3>継続率</h3>
+              <div className="kpi-value">{monthlyKpiData.retentionRate}%</div>
+            </div>
+            <div className="kpi-card">
               <h3>客単価</h3>
               <div className="kpi-value">¥{Math.round(monthlyKpiData.averageOrderValue).toLocaleString()}</div>
             </div>
@@ -1362,6 +1495,99 @@ const Dashboard = () => {
                 ) : (
                   <div className="chart-placeholder">
                     担当者を選択してください
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {/* 月別クライアント実績詳細 */}
+          {selectedUser && selectedMonth && (
+            <div className="chart-section" style={{ marginTop: '30px' }}>
+              <div className="card">
+                <h3>当月クライアント別実績詳細</h3>
+                {monthlyClientDetailsLoading ? (
+                  <div className="chart-placeholder">読み込み中...</div>
+                ) : monthlyClientDetails.length > 0 ? (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ 
+                      width: '100%', 
+                      borderCollapse: 'collapse',
+                      marginTop: '15px'
+                    }}>
+                      <thead>
+                        <tr style={{ 
+                          backgroundColor: '#f8f9fa',
+                          borderBottom: '2px solid #dee2e6'
+                        }}>
+                          <th style={{ 
+                            padding: '12px 15px',
+                            textAlign: 'left',
+                            fontWeight: '600',
+                            border: '1px solid #dee2e6'
+                          }}>クライアント名</th>
+                          <th style={{ 
+                            padding: '12px 15px',
+                            textAlign: 'left',
+                            fontWeight: '600',
+                            border: '1px solid #dee2e6'
+                          }}>案件名</th>
+                          <th style={{ 
+                            padding: '12px 15px',
+                            textAlign: 'right',
+                            fontWeight: '600',
+                            border: '1px solid #dee2e6'
+                          }}>粗利</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monthlyClientDetails.map((detail, index) => (
+                          <tr key={index} style={{ 
+                            borderBottom: '1px solid #dee2e6',
+                            backgroundColor: index % 2 === 0 ? '#ffffff' : '#f8f9fa'
+                          }}>
+                            <td style={{ 
+                              padding: '12px 15px',
+                              border: '1px solid #dee2e6'
+                            }}>{detail.clientName}</td>
+                            <td style={{ 
+                              padding: '12px 15px',
+                              border: '1px solid #dee2e6'
+                            }}>{detail.projectName}</td>
+                            <td style={{ 
+                              padding: '12px 15px',
+                              textAlign: 'right',
+                              fontWeight: '600',
+                              color: '#28a745',
+                              border: '1px solid #dee2e6'
+                            }}>¥{Math.round(detail.grossProfit).toLocaleString()}</td>
+                          </tr>
+                        ))}
+                        <tr style={{ 
+                          backgroundColor: '#e9ecef',
+                          fontWeight: '700',
+                          borderTop: '2px solid #6c757d'
+                        }}>
+                          <td colSpan={2} style={{ 
+                            padding: '12px 15px',
+                            textAlign: 'right',
+                            border: '1px solid #dee2e6'
+                          }}>合計</td>
+                          <td style={{ 
+                            padding: '12px 15px',
+                            textAlign: 'right',
+                            fontWeight: '700',
+                            color: '#dc3545',
+                            fontSize: '1.1em',
+                            border: '1px solid #dee2e6'
+                          }}>¥{Math.round(monthlyClientDetails.reduce((sum, detail) => sum + detail.grossProfit, 0)).toLocaleString()}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="chart-placeholder">
+                    {selectedUser && selectedMonth ? '当月の実績データはありません' : '担当者と月を選択してください'}
                   </div>
                 )}
               </div>

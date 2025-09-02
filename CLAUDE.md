@@ -38,6 +38,7 @@ https://sales-management-system-2b9db.web.app/projects
 ### フィルター機能
 - **ステータスフィルター**: 全て/提案中/交渉中/受注/失注/稼働中/稼働終了
 - **担当者フィルター**: 全て + 登録済みユーザー一覧
+- **実績フィルター**: 全て/新規/既存/未選択
 
 ### 案件単位テーブル仕様
 | 列名 | 表示内容 | データソース |
@@ -48,7 +49,9 @@ https://sales-management-system-2b9db.web.app/projects
 | 担当者 | 担当者名 | users.name (IDから名称に変換) |
 | ステータス | 案件ステータス | カラーバッジで表示 |
 | 実績 | 最新ログの実績タイプ | 未選択/新規/既存 (カラーバッジ) |
-| 最終接触日 | 最後の接触日 | project.lastContactDate |
+| 初回商談日 | 初回商談日 | project.firstMeetingDate (ソート可能) |
+| 受注日 | 受注日 | project.orderDate (ソート可能) |
+| 最終接触日 | 最後の接触日 | project.lastContactDate (ソート可能) |
 | アクション | 操作ボタン群 | 詳細/編集/追加/削除 |
 
 ### ステータス表示
@@ -199,3 +202,94 @@ useEffect(() => {
 - **次回アクション**: 必須項目 → 任意項目
 - **変更箇所**: `ActionLogRecord.tsx`の`required`属性と必須マーク（*）を削除
 - **目的**: より柔軟なログ記録を可能にする
+
+## ダッシュボードKPI受注日統一修正 (2025/8/26)
+
+### 問題の発見
+- **受注管理の「確定日」**: `Order.orderDate`（ログ記録時の自動日時）
+- **案件管理の「受注日」**: `Project.orderDate`（手動設定、多くが未設定）
+- **ダッシュボードKPI**: `Project.orderDate`を参照するため受注日未設定案件が除外される
+
+### 解決内容
+
+#### 1. 受注管理画面の修正
+**テーブル列の変更:**
+- **削除**: 確定日（`Order.orderDate`）
+- **追加**: 受注日（`Project.orderDate` - 未設定時は「-」）
+- **追加**: 最終接触日（`Project.lastContactDate` - 未設定時は「-」）
+
+**データソース統一:**
+- 受注日: 案件管理で設定した正式な受注日
+- 最終接触日: 案件管理で設定されている最終接触日
+- フィルター機能も受注日ベースに変更
+
+#### 2. ダッシュボードKPI数値整合性修正
+**総受注数計算の統一:**
+
+```typescript
+// 修正前（月別KPI）
+totalOrders: monthlyProjects.filter(p => p.status === 'won').length,
+
+// 修正後（月別KPI） 
+totalOrders: monthlyProjects.filter(p => 
+  p.status === 'won' && 
+  p.orderDate && 
+  p.orderDate.toISOString().substring(0, 7) === selectedMonth
+).length,
+
+// 修正前（年間累計KPI）
+totalOrders: filteredProjects.filter(p => p.status === 'won').length,
+
+// 修正後（年間累計KPI）
+totalOrders: (newOrderProjects.length + existingOrderProjects.length),
+```
+
+### 修正の効果
+- **データ整合性**: 案件管理の受注日とダッシュボードKPIが同じ`Project.orderDate`を参照
+- **数値整合性**: 総受注数 = 新規受注数 + 既存受注数
+- **一貫性**: すべてのKPIが受注日ベースで統一
+- **除外処理**: 受注日未設定の`status='won'`案件は全KPIから除外
+
+### 技術修正箇所
+1. **OrderManagement.tsx**: プロジェクトデータとの結合、テーブル表示修正
+2. **Dashboard.tsx**: 月別・年間・部署別KPIの総受注数計算統一
+3. **フィルター機能**: 受注日ベースでのフィルタリングに変更
+
+## 案件管理機能強化 (2025/9/1)
+
+### ダッシュボード月別商談数修正
+**問題**: 月別KPIで総商談数と新規商談数の数値整合性に問題があった
+**解決**: 
+1. **総商談数計算**: アクションログ数 → プロジェクト数に統一
+2. **月別フィルタリング**: 初回商談日ベースに変更（firstMeetingDate優先、未設定時はcreatedAt）
+
+### 案件管理テーブル機能強化
+#### 1. ソート機能追加
+- **対象列**: 初回商談日、受注日、最終接触日
+- **機能**: ヘッダークリックで昇順・降順切り替え
+- **UI**: ソート状態を示すアイコン（△▲▼）表示
+- **実装**: クリック可能なヘッダー、ホバー効果、日付null値対応
+
+#### 2. 実績フィルター追加
+- **フィルター選択肢**: 全て/新規/既存/未選択
+- **連携**: 既存のステータス・担当者フィルターと組み合わせ可能
+- **データソース**: 最新アクションログのperformanceType
+
+### 技術実装
+```typescript
+// ソート機能
+const [sortField, setSortField] = useState<'firstMeetingDate' | 'orderDate' | 'lastContactDate' | null>(null);
+const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+// 実績フィルター
+const [performanceFilter, setPerformanceFilter] = useState('');
+
+// 月別商談フィルタリング（初回商談日ベース）
+const monthlyProjects = filteredProjects.filter(p => {
+  if (p.firstMeetingDate) {
+    return p.firstMeetingDate.toISOString().substring(0, 7) === selectedMonth;
+  }
+  const createdMonth = p.createdAt.toISOString().substring(0, 7);
+  return createdMonth === selectedMonth;
+});
+```
