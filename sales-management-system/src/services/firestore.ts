@@ -20,7 +20,11 @@ import type {
   ActionLog, 
   Order, 
   Performance,
-  FreeWriting
+  FreeWriting,
+  PerformanceImportHistory,
+  PerformanceComparison,
+  MonthlyPerformanceComparison,
+  MonthlyComparisonDetail
 } from '../types';
 
 // Users Collection
@@ -401,4 +405,255 @@ export const updateFreeWriting = async (id: string, content: string) => {
     content,
     updatedAt: Timestamp.fromDate(new Date())
   });
+};
+
+// Performance Import History Collection
+export const performanceImportHistoryCollection = collection(db, 'performanceImportHistory');
+
+export const savePerformanceHistory = async (data: Performance[], importType: 'current' | 'previous'): Promise<void> => {
+  // 既存の同じimportTypeのデータを削除
+  const q = query(performanceImportHistoryCollection, where('importType', '==', importType));
+  const snapshot = await getDocs(q);
+  const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+  await Promise.all(deletePromises);
+  
+  // 新しい履歴を保存
+  await addDoc(performanceImportHistoryCollection, {
+    importDate: Timestamp.fromDate(new Date()),
+    importType,
+    dataSnapshot: data.map(item => ({
+      ...item,
+      createdAt: Timestamp.fromDate(item.createdAt)
+    }))
+  });
+};
+
+export const getPerformanceHistory = async (importType: 'current' | 'previous'): Promise<PerformanceImportHistory | null> => {
+  const q = query(performanceImportHistoryCollection, where('importType', '==', importType));
+  const snapshot = await getDocs(q);
+  
+  if (snapshot.empty) {
+    return null;
+  }
+  
+  const doc = snapshot.docs[0];
+  const data = doc.data();
+  return {
+    id: doc.id,
+    importDate: data.importDate.toDate(),
+    importType: data.importType,
+    dataSnapshot: data.dataSnapshot.map((item: any) => ({
+      ...item,
+      createdAt: item.createdAt.toDate()
+    }))
+  } as PerformanceImportHistory;
+};
+
+export const getPerformanceComparison = async (): Promise<{
+  comparisons: PerformanceComparison[];
+  hasHistory: boolean;
+}> => {
+  const previous = await getPerformanceHistory('previous');
+  const current = await getPerformanceHistory('current');
+  
+  if (!previous || !current) {
+    return { comparisons: [], hasHistory: false };
+  }
+  
+  const calculatePeriodTotal = (data: Performance[], startMonth: number, endMonth: number): number => {
+    return data
+      .filter(p => {
+        const month = parseInt(p.recordingMonth.substring(5, 7));
+        return month >= startMonth && month <= endMonth;
+      })
+      .reduce((sum, p) => sum + p.grossProfit, 0);
+  };
+  
+  const periods = [
+    { name: '下期（7月〜12月）', start: 7, end: 12 },
+    { name: 'Q3（7月〜9月）', start: 7, end: 9 },
+    { name: 'Q4（10月〜12月）', start: 10, end: 12 }
+  ];
+  
+  const comparisons = periods.map(period => {
+    const previousTotal = calculatePeriodTotal(previous.dataSnapshot, period.start, period.end);
+    const currentTotal = calculatePeriodTotal(current.dataSnapshot, period.start, period.end);
+    const difference = currentTotal - previousTotal;
+    const percentageChange = previousTotal > 0 ? (difference / previousTotal) * 100 : 0;
+    
+    return {
+      period: period.name,
+      previous: previousTotal,
+      current: currentTotal,
+      difference,
+      percentageChange,
+      lastImportDate: previous.importDate,
+      currentImportDate: current.importDate
+    };
+  });
+  
+  return { comparisons, hasHistory: true };
+};
+
+export const getPersonalPerformanceComparison = async (assigneeId: string): Promise<{
+  comparisons: PerformanceComparison[];
+  hasHistory: boolean;
+}> => {
+  const previous = await getPerformanceHistory('previous');
+  const current = await getPerformanceHistory('current');
+  
+  if (!previous || !current) {
+    return { comparisons: [], hasHistory: false };
+  }
+  
+  // 個人別にフィルタリング
+  const previousPersonalData = previous.dataSnapshot.filter(p => p.assigneeId === assigneeId);
+  const currentPersonalData = current.dataSnapshot.filter(p => p.assigneeId === assigneeId);
+  
+  const calculatePeriodTotal = (data: Performance[], startMonth: number, endMonth: number): number => {
+    return data
+      .filter(p => {
+        const month = parseInt(p.recordingMonth.substring(5, 7));
+        return month >= startMonth && month <= endMonth;
+      })
+      .reduce((sum, p) => sum + p.grossProfit, 0);
+  };
+  
+  const periods = [
+    { name: '下期（7月〜12月）', start: 7, end: 12 },
+    { name: 'Q3（7月〜9月）', start: 7, end: 9 },
+    { name: 'Q4（10月〜12月）', start: 10, end: 12 }
+  ];
+  
+  const comparisons = periods.map(period => {
+    const previousTotal = calculatePeriodTotal(previousPersonalData, period.start, period.end);
+    const currentTotal = calculatePeriodTotal(currentPersonalData, period.start, period.end);
+    const difference = currentTotal - previousTotal;
+    const percentageChange = previousTotal > 0 ? (difference / previousTotal) * 100 : 0;
+    
+    return {
+      period: period.name,
+      previous: previousTotal,
+      current: currentTotal,
+      difference,
+      percentageChange,
+      lastImportDate: previous.importDate,
+      currentImportDate: current.importDate
+    };
+  });
+  
+  return { comparisons, hasHistory: true };
+};
+
+export const getMonthlyPerformanceComparison = async (assigneeId?: string): Promise<MonthlyPerformanceComparison[]> => {
+  const previous = await getPerformanceHistory('previous');
+  const current = await getPerformanceHistory('current');
+  
+  if (!previous || !current) {
+    return [];
+  }
+  
+  // 個人別フィルタリング（assigneeIdが指定されている場合）
+  const previousData = assigneeId 
+    ? previous.dataSnapshot.filter(p => p.assigneeId === assigneeId)
+    : previous.dataSnapshot;
+  const currentData = assigneeId 
+    ? current.dataSnapshot.filter(p => p.assigneeId === assigneeId)
+    : current.dataSnapshot;
+  
+  const months = [
+    { month: '2025-07', monthName: '7月' },
+    { month: '2025-08', monthName: '8月' },
+    { month: '2025-09', monthName: '9月' },
+    { month: '2025-10', monthName: '10月' },
+    { month: '2025-11', monthName: '11月' },
+    { month: '2025-12', monthName: '12月' }
+  ];
+  
+  const monthlyComparisons: MonthlyPerformanceComparison[] = months.map(({ month, monthName }) => {
+    // 該当月のデータを抽出
+    const previousMonthData = previousData.filter(p => p.recordingMonth.startsWith(month));
+    const currentMonthData = currentData.filter(p => p.recordingMonth.startsWith(month));
+    
+    // 月合計を計算
+    const previousTotal = previousMonthData.reduce((sum, p) => sum + p.grossProfit, 0);
+    const currentTotal = currentMonthData.reduce((sum, p) => sum + p.grossProfit, 0);
+    const difference = currentTotal - previousTotal;
+    const percentageChange = previousTotal > 0 ? (difference / previousTotal) * 100 : 0;
+    
+    // 差分要因詳細を計算
+    const details = calculateMonthlyComparisonDetails(previousMonthData, currentMonthData);
+    
+    return {
+      month,
+      monthName,
+      previous: previousTotal,
+      current: currentTotal,
+      difference,
+      percentageChange,
+      details
+    };
+  });
+  
+  return monthlyComparisons;
+};
+
+const calculateMonthlyComparisonDetails = (
+  previousData: Performance[], 
+  currentData: Performance[]
+): MonthlyComparisonDetail[] => {
+  const details: MonthlyComparisonDetail[] = [];
+  
+  // 前回データのマップを作成（クライアント名＋案件名をキーとする）
+  const previousMap = new Map<string, number>();
+  previousData.forEach(p => {
+    const key = `${p.clientName}|${p.projectName}`;
+    previousMap.set(key, (previousMap.get(key) || 0) + p.grossProfit);
+  });
+  
+  // 最新データのマップを作成
+  const currentMap = new Map<string, number>();
+  currentData.forEach(p => {
+    const key = `${p.clientName}|${p.projectName}`;
+    currentMap.set(key, (currentMap.get(key) || 0) + p.grossProfit);
+  });
+  
+  // 全てのキー（クライアント名＋案件名の組み合わせ）を収集
+  const allKeys = new Set([...previousMap.keys(), ...currentMap.keys()]);
+  
+  allKeys.forEach(key => {
+    const [clientName, projectName] = key.split('|');
+    const previousAmount = previousMap.get(key) || 0;
+    const currentAmount = currentMap.get(key) || 0;
+    const difference = currentAmount - previousAmount;
+    
+    let changeType: 'new' | 'increased' | 'decreased' | 'removed';
+    
+    if (previousAmount === 0 && currentAmount > 0) {
+      changeType = 'new';
+    } else if (previousAmount > 0 && currentAmount === 0) {
+      changeType = 'removed';
+    } else if (difference > 0) {
+      changeType = 'increased';
+    } else if (difference < 0) {
+      changeType = 'decreased';
+    } else {
+      // 差分が0の場合はスキップ
+      return;
+    }
+    
+    details.push({
+      clientName,
+      projectName,
+      previousAmount,
+      currentAmount,
+      difference,
+      changeType
+    });
+  });
+  
+  // 差分の絶対値で降順ソート
+  details.sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference));
+  
+  return details;
 };

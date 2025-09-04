@@ -293,3 +293,79 @@ const monthlyProjects = filteredProjects.filter(p => {
   return createdMonth === selectedMonth;
 });
 ```
+
+## 前週対比機能拡張 (2025/9/4)
+
+### 概要
+CSV実績データの前回インポートと最新インポートの差分を詳細に比較・分析する機能を実装。
+
+### 主要機能
+
+#### 1. **個人タブ対応**
+- 担当者選択時に個人別でフィルタリングした前週対比データを表示
+- 全体タブと同様の期間別比較・月別比較機能
+
+#### 2. **月単位での差分表示**
+- **期間別比較**: 下期（7月〜12月）、Q3（7月〜9月）、Q4（10月〜12月）
+- **月別比較**: 7月〜12月の各月別詳細比較
+- 前回インポート vs 最新インポートの金額差分と変化率表示
+
+#### 3. **差分要因詳細（クライアント・案件別）**
+- **新規追加案件**: 前回になく最新にある案件
+- **金額増加案件**: 前回より金額が増加した案件
+- **金額減少案件**: 前回より金額が減少した案件
+- **削除案件**: 前回にあり最新にない案件
+- 各カテゴリ最大5件表示、超過分は件数表示
+
+#### 4. **アコーディオンUI**
+- 期間別・月別のヘッダークリックで展開/折りたたみ
+- チェブロンアイコン（▼）の回転アニメーション
+- 月別展開時に差分要因詳細を表示
+
+### 技術実装
+
+#### データ構造
+```typescript
+export interface MonthlyPerformanceComparison {
+  month: string; // '2025-07', '2025-08' etc.
+  monthName: string; // '7月', '8月' etc.
+  previous: number;
+  current: number;
+  difference: number;
+  percentageChange: number;
+  details: MonthlyComparisonDetail[]; // 差分要因詳細
+}
+
+export interface MonthlyComparisonDetail {
+  clientName: string;
+  projectName: string;
+  previousAmount: number;
+  currentAmount: number;
+  difference: number;
+  changeType: 'new' | 'increased' | 'decreased' | 'removed';
+}
+```
+
+#### 主要関数
+- `getPersonalPerformanceComparison()`: 個人別前週対比データ取得
+- `getMonthlyPerformanceComparison()`: 月別比較データ取得
+- `calculateMonthlyComparisonDetails()`: 差分要因詳細計算
+
+#### 表示位置
+- **全体タブ**: 月別KPI下に期間別・月別比較セクション
+- **個人タブ**: 月別KPI下に個人用前週対比セクション
+
+### 使用方法
+1. 実績入力でCSVを2回インポート（前回・最新の履歴作成）
+2. 全体タブ: 会社全体の前週対比確認
+3. 個人タブ: 担当者選択後、個人の前週対比確認
+4. 各月クリック: 差分要因詳細（クライアント・案件別）確認
+
+### UI/UX特徴
+- **色分け表示**: 増加（緑）・減少（赤）・中立（青・オレンジ）
+- **金額表示**: カンマ区切り、円マーク付き
+- **変化率**: パーセンテージ表示、矢印アイコン
+- **レスポンシブ**: モバイル対応の縦積み表示
+
+---
+*最終更新日: 2025年9月4日*

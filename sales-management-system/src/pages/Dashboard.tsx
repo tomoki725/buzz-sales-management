@@ -6,11 +6,13 @@ import {
 import { 
   getProjects, getPerformance, 
   getClients, getUsers, getSalesTargets,
-  createSalesTarget, updateSalesTarget
+  createSalesTarget, updateSalesTarget,
+  getPerformanceComparison, getPersonalPerformanceComparison,
+  getMonthlyPerformanceComparison
 } from '../services/firestore';
 import FreeWritingSection from '../components/FreeWritingSection';
 import { getCurrentWeek, getCurrentMonth } from '../utils/dateUtils';
-import type { User, Alert } from '../types';
+import type { User, Alert, PerformanceComparison, MonthlyPerformanceComparison } from '../types';
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState<'personal' | 'department' | 'overall'>('overall');
@@ -125,6 +127,18 @@ const Dashboard = () => {
     grossProfit: number;
   }[]>([]);
   const [monthlyClientDetailsLoading, setMonthlyClientDetailsLoading] = useState(false);
+  
+  // 前週対比データ
+  const [performanceComparisons, setPerformanceComparisons] = useState<PerformanceComparison[]>([]);
+  const [personalPerformanceComparisons, setPersonalPerformanceComparisons] = useState<PerformanceComparison[]>([]);
+  const [monthlyComparisons, setMonthlyComparisons] = useState<MonthlyPerformanceComparison[]>([]);
+  const [personalMonthlyComparisons, setPersonalMonthlyComparisons] = useState<MonthlyPerformanceComparison[]>([]);
+  const [hasComparisonHistory, setHasComparisonHistory] = useState(false);
+  const [hasPersonalComparisonHistory, setHasPersonalComparisonHistory] = useState(false);
+  
+  // アコーディオン状態管理
+  const [expandedPeriods, setExpandedPeriods] = useState<Set<string>>(new Set());
+  const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
   
   // 継続率計算関数
   const calculateRetentionRate = (
@@ -273,6 +287,15 @@ const Dashboard = () => {
       loadMonthlyClientDetails();
     }
   }, [selectedUser, selectedMonth, activeTab]);
+  
+  // 前週対比データの読み込み
+  useEffect(() => {
+    if (activeTab === 'overall') {
+      loadComparisonData();
+    } else if (activeTab === 'personal' && selectedUser) {
+      loadPersonalComparisonData(selectedUser);
+    }
+  }, [activeTab, selectedUser]); // タブ切り替えと担当者変更時に読み込み
   
   const loadData = async () => {
     setLoading(true);
@@ -764,11 +787,19 @@ const Dashboard = () => {
       
       const newDealProjects = monthlyProjects.filter(p => newClientsSet.has(p.clientName));
       const existingDealProjects = monthlyProjects.filter(p => existingClientsSet.has(p.clientName));
-      const newOrderProjects = newDealProjects.filter(p => 
-        p.status === 'won'
+      
+      // 受注日ベースで直接フィルタリング（初回商談日は関係なし）
+      const newOrderProjects = filteredProjects.filter(p => 
+        p.status === 'won' && 
+        p.orderDate && 
+        p.orderDate.toISOString().substring(0, 7) === selectedMonth &&
+        newClientsSet.has(p.clientName)
       );
-      const existingOrderProjects = existingDealProjects.filter(p => 
-        p.status === 'won'
+      const existingOrderProjects = filteredProjects.filter(p => 
+        p.status === 'won' && 
+        p.orderDate && 
+        p.orderDate.toISOString().substring(0, 7) === selectedMonth &&
+        existingClientsSet.has(p.clientName)
       );
       
       // 月別の売上・粗利計算
@@ -805,11 +836,7 @@ const Dashboard = () => {
       
       const monthlyKpiResult = {
         totalDeals: monthlyProjects.length,
-        totalOrders: monthlyProjects.filter(p => 
-          p.status === 'won' && 
-          p.orderDate && 
-          p.orderDate.toISOString().substring(0, 7) === selectedMonth
-        ).length,
+        totalOrders: newOrderProjects.length + existingOrderProjects.length,
         newDeals: newDealProjects.length,
         newOrders: newOrderProjects.length,
         existingDeals: existingDealProjects.length,
@@ -895,11 +922,19 @@ const Dashboard = () => {
       
       const newDealProjects = monthlyProjects.filter(p => newClientsSet.has(p.clientName));
       const existingDealProjects = monthlyProjects.filter(p => existingClientsSet.has(p.clientName));
-      const newOrderProjects = newDealProjects.filter(p => 
-        p.status === 'won'
+      
+      // 受注日ベースで直接フィルタリング（初回商談日は関係なし）
+      const newOrderProjects = filteredProjects.filter(p => 
+        p.status === 'won' && 
+        p.orderDate && 
+        p.orderDate.toISOString().substring(0, 7) === selectedMonth &&
+        newClientsSet.has(p.clientName)
       );
-      const existingOrderProjects = existingDealProjects.filter(p => 
-        p.status === 'won'
+      const existingOrderProjects = filteredProjects.filter(p => 
+        p.status === 'won' && 
+        p.orderDate && 
+        p.orderDate.toISOString().substring(0, 7) === selectedMonth &&
+        existingClientsSet.has(p.clientName)
       );
       
       // 月別の売上・粗利計算
@@ -915,8 +950,8 @@ const Dashboard = () => {
       
       const departmentMonthlyKpiResult = {
         totalDeals: monthlyProjects.length,
-        // monthlyProjectsは既にorderDateでフィルタリング済みなのでstatusチェックのみ
-        totalOrders: monthlyProjects.filter(p => p.status === 'won').length,
+        // 新規受注数と既存受注数の合計
+        totalOrders: newOrderProjects.length + existingOrderProjects.length,
         newDeals: newDealProjects.length,
         newOrders: newOrderProjects.length,
         existingDeals: existingDealProjects.length,
@@ -1110,6 +1145,67 @@ const Dashboard = () => {
     return `${prefix}${actualStr} / ${prefix}${targetStr}`;
   };
 
+  // 前週対比データの読み込み（全体）
+  const loadComparisonData = async () => {
+    try {
+      const { comparisons, hasHistory } = await getPerformanceComparison();
+      setPerformanceComparisons(comparisons);
+      setHasComparisonHistory(hasHistory);
+      
+      // 月別比較データも読み込み
+      const monthlyComparisons = await getMonthlyPerformanceComparison();
+      setMonthlyComparisons(monthlyComparisons);
+    } catch (error) {
+      console.error('Error loading comparison data:', error);
+      setPerformanceComparisons([]);
+      setMonthlyComparisons([]);
+      setHasComparisonHistory(false);
+    }
+  };
+  
+  // 前週対比データの読み込み（個人）
+  const loadPersonalComparisonData = async (assigneeId: string) => {
+    try {
+      const { comparisons, hasHistory } = await getPersonalPerformanceComparison(assigneeId);
+      setPersonalPerformanceComparisons(comparisons);
+      setHasPersonalComparisonHistory(hasHistory);
+      
+      // 個人別月別比較データも読み込み
+      const monthlyComparisons = await getMonthlyPerformanceComparison(assigneeId);
+      setPersonalMonthlyComparisons(monthlyComparisons);
+    } catch (error) {
+      console.error('Error loading personal comparison data:', error);
+      setPersonalPerformanceComparisons([]);
+      setPersonalMonthlyComparisons([]);
+      setHasPersonalComparisonHistory(false);
+    }
+  };
+  
+  // アコーディオン制御
+  const togglePeriodExpansion = (period: string) => {
+    setExpandedPeriods(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(period)) {
+        newSet.delete(period);
+      } else {
+        newSet.add(period);
+      }
+      return newSet;
+    });
+  };
+  
+  const toggleMonthExpansion = (month: string) => {
+    setExpandedMonths(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(month)) {
+        newSet.delete(month);
+      } else {
+        newSet.add(month);
+      }
+      return newSet;
+    });
+  };
+
   // アラート削除機能
   const dismissAlert = (alertId: string) => {
     const newDismissedAlerts = new Set(dismissedAlerts);
@@ -1252,6 +1348,212 @@ const Dashboard = () => {
                 <div className="kpi-value">¥{Math.round(monthlyKpiData.averageOrderValue).toLocaleString()}</div>
               </div>
             </div>
+          
+          {/* 前週対比セクション */}
+          {hasComparisonHistory && performanceComparisons.length > 0 && (
+            <div className="comparison-section" style={{ marginTop: '30px' }}>
+              <h2>📊 前週対比</h2>
+              <div style={{ 
+                backgroundColor: '#f8f9fa', 
+                padding: '20px', 
+                borderRadius: '8px',
+                border: '1px solid #e0e0e0'
+              }}>
+                {/* 期間別比較 */}
+                <h3 style={{ fontSize: '18px', marginBottom: '15px', color: '#333' }}>期間別比較</h3>
+                {performanceComparisons.map((comparison, index) => (
+                  <div key={index} style={{ 
+                    marginBottom: '10px',
+                    backgroundColor: 'white',
+                    borderRadius: '6px',
+                    border: '1px solid #dee2e6',
+                    overflow: 'hidden'
+                  }}>
+                    <div 
+                      style={{ 
+                        padding: '15px',
+                        cursor: 'pointer',
+                        borderBottom: expandedPeriods.has(comparison.period) ? '1px solid #dee2e6' : 'none',
+                        backgroundColor: '#fafafa'
+                      }}
+                      onClick={() => togglePeriodExpansion(comparison.period)}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h4 style={{ margin: 0, fontSize: '16px', color: '#333' }}>
+                          {comparison.period}
+                        </h4>
+                        <span style={{ fontSize: '18px', transform: expandedPeriods.has(comparison.period) ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                          ▼
+                        </span>
+                      </div>
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center',
+                        fontSize: '14px',
+                        marginTop: '8px'
+                      }}>
+                        <span>前回: ¥{Math.round(comparison.previous).toLocaleString()}</span>
+                        <span style={{ margin: '0 10px' }}>→</span>
+                        <span>最新: ¥{Math.round(comparison.current).toLocaleString()}</span>
+                        <span style={{ 
+                          marginLeft: '15px',
+                          fontWeight: 'bold',
+                          color: comparison.difference >= 0 ? '#28a745' : '#dc3545'
+                        }}>
+                          差分: {comparison.difference >= 0 ? '+' : ''}¥{Math.round(comparison.difference).toLocaleString()}
+                          ({comparison.percentageChange >= 0 ? '+' : ''}{comparison.percentageChange.toFixed(1)}%)
+                          {comparison.difference >= 0 ? ' ↑' : ' ↓'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                
+                {/* 月別比較 */}
+                {monthlyComparisons.length > 0 && (
+                  <div style={{ marginTop: '25px' }}>
+                    <h3 style={{ fontSize: '18px', marginBottom: '15px', color: '#333' }}>月別比較</h3>
+                    {monthlyComparisons.map((monthlyComp, index) => (
+                      <div key={index} style={{ 
+                        marginBottom: '10px',
+                        backgroundColor: 'white',
+                        borderRadius: '6px',
+                        border: '1px solid #dee2e6',
+                        overflow: 'hidden'
+                      }}>
+                        <div 
+                          style={{ 
+                            padding: '15px',
+                            cursor: 'pointer',
+                            borderBottom: expandedMonths.has(monthlyComp.month) ? '1px solid #dee2e6' : 'none',
+                            backgroundColor: '#fafafa'
+                          }}
+                          onClick={() => toggleMonthExpansion(monthlyComp.month)}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h4 style={{ margin: 0, fontSize: '16px', color: '#333' }}>
+                              {monthlyComp.monthName}
+                            </h4>
+                            <span style={{ fontSize: '18px', transform: expandedMonths.has(monthlyComp.month) ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                              ▼
+                            </span>
+                          </div>
+                          <div style={{ 
+                            display: 'flex', 
+                            alignItems: 'center',
+                            fontSize: '14px',
+                            marginTop: '8px'
+                          }}>
+                            <span>前回: ¥{Math.round(monthlyComp.previous).toLocaleString()}</span>
+                            <span style={{ margin: '0 10px' }}>→</span>
+                            <span>最新: ¥{Math.round(monthlyComp.current).toLocaleString()}</span>
+                            <span style={{ 
+                              marginLeft: '15px',
+                              fontWeight: 'bold',
+                              color: monthlyComp.difference >= 0 ? '#28a745' : '#dc3545'
+                            }}>
+                              差分: {monthlyComp.difference >= 0 ? '+' : ''}¥{Math.round(monthlyComp.difference).toLocaleString()}
+                              ({monthlyComp.percentageChange >= 0 ? '+' : ''}{monthlyComp.percentageChange.toFixed(1)}%)
+                              {monthlyComp.difference >= 0 ? ' ↑' : ' ↓'}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        {/* 月別詳細（差分要因） */}
+                        {expandedMonths.has(monthlyComp.month) && monthlyComp.details.length > 0 && (
+                          <div style={{ padding: '15px', backgroundColor: 'white' }}>
+                            <h5 style={{ margin: '0 0 15px 0', fontSize: '14px', color: '#666' }}>差分要因詳細</h5>
+                            {['new', 'increased', 'decreased', 'removed'].map(changeType => {
+                              const typeDetails = monthlyComp.details.filter(d => d.changeType === changeType);
+                              if (typeDetails.length === 0) return null;
+                              
+                              const typeLabels = {
+                                new: '新規追加案件',
+                                increased: '金額増加案件',
+                                decreased: '金額減少案件',
+                                removed: '削除案件'
+                              };
+                              
+                              const typeColors = {
+                                new: '#28a745',
+                                increased: '#17a2b8',
+                                decreased: '#ffc107',
+                                removed: '#dc3545'
+                              };
+                              
+                              return (
+                                <div key={changeType} style={{ marginBottom: '15px' }}>
+                                  <div style={{ 
+                                    fontSize: '13px', 
+                                    fontWeight: 'bold', 
+                                    color: typeColors[changeType as keyof typeof typeColors],
+                                    marginBottom: '8px'
+                                  }}>
+                                    {typeLabels[changeType as keyof typeof typeLabels]} ({typeDetails.length}件)
+                                  </div>
+                                  <div style={{ paddingLeft: '15px' }}>
+                                    {typeDetails.slice(0, 5).map((detail, detailIndex) => (
+                                      <div key={detailIndex} style={{ 
+                                        fontSize: '12px', 
+                                        marginBottom: '4px',
+                                        color: '#555'
+                                      }}>
+                                        • {detail.clientName} - {detail.projectName}: 
+                                        {changeType === 'new' ? (
+                                          <span style={{ color: '#28a745', fontWeight: 'bold' }}>
+                                            +¥{Math.round(detail.currentAmount).toLocaleString()}
+                                          </span>
+                                        ) : changeType === 'removed' ? (
+                                          <span style={{ color: '#dc3545', fontWeight: 'bold' }}>
+                                            -¥{Math.round(detail.previousAmount).toLocaleString()}
+                                          </span>
+                                        ) : (
+                                          <>
+                                            ¥{Math.round(detail.previousAmount).toLocaleString()} → 
+                                            ¥{Math.round(detail.currentAmount).toLocaleString()} (
+                                            <span style={{ 
+                                              color: detail.difference >= 0 ? '#28a745' : '#dc3545',
+                                              fontWeight: 'bold'
+                                            }}>
+                                              {detail.difference >= 0 ? '+' : ''}¥{Math.round(detail.difference).toLocaleString()}
+                                            </span>)
+                                          </>
+                                        )}
+                                      </div>
+                                    ))}
+                                    {typeDetails.length > 5 && (
+                                      <div style={{ fontSize: '12px', color: '#999', fontStyle: 'italic' }}>
+                                        ... 他{typeDetails.length - 5}件
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {performanceComparisons[0] && (
+                  <div style={{ 
+                    marginTop: '15px', 
+                    paddingTop: '15px',
+                    borderTop: '1px solid #dee2e6',
+                    fontSize: '12px',
+                    color: '#6c757d'
+                  }}>
+                    <div>※ 前回インポート: {performanceComparisons[0].lastImportDate ? 
+                      new Date(performanceComparisons[0].lastImportDate).toLocaleString('ja-JP') : '-'}</div>
+                    <div>※ 最新インポート: {performanceComparisons[0].currentImportDate ? 
+                      new Date(performanceComparisons[0].currentImportDate).toLocaleString('ja-JP') : '-'}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
             
           {/* アラートスペース */}
           {visibleAlerts.length > 0 && (
@@ -1464,6 +1766,212 @@ const Dashboard = () => {
               <div className="kpi-value">¥{Math.round(monthlyKpiData.averageOrderValue).toLocaleString()}</div>
             </div>
           </div>
+          
+          {/* 個人用前週対比セクション */}
+          {selectedUser && hasPersonalComparisonHistory && personalPerformanceComparisons.length > 0 && (
+            <div className="comparison-section" style={{ marginTop: '30px' }}>
+              <h2>📊 前週対比（個人）</h2>
+              <div style={{ 
+                backgroundColor: '#f8f9fa', 
+                padding: '20px', 
+                borderRadius: '8px',
+                border: '1px solid #e0e0e0'
+              }}>
+                {/* 期間別比較 */}
+                <h3 style={{ fontSize: '18px', marginBottom: '15px', color: '#333' }}>期間別比較</h3>
+                {personalPerformanceComparisons.map((comparison, index) => (
+                  <div key={index} style={{ 
+                    marginBottom: '10px',
+                    backgroundColor: 'white',
+                    borderRadius: '6px',
+                    border: '1px solid #dee2e6',
+                    overflow: 'hidden'
+                  }}>
+                    <div 
+                      style={{ 
+                        padding: '15px',
+                        cursor: 'pointer',
+                        borderBottom: expandedPeriods.has(`personal-${comparison.period}`) ? '1px solid #dee2e6' : 'none',
+                        backgroundColor: '#fafafa'
+                      }}
+                      onClick={() => togglePeriodExpansion(`personal-${comparison.period}`)}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h4 style={{ margin: 0, fontSize: '16px', color: '#333' }}>
+                          {comparison.period}
+                        </h4>
+                        <span style={{ fontSize: '18px', transform: expandedPeriods.has(`personal-${comparison.period}`) ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                          ▼
+                        </span>
+                      </div>
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center',
+                        fontSize: '14px',
+                        marginTop: '8px'
+                      }}>
+                        <span>前回: ¥{Math.round(comparison.previous).toLocaleString()}</span>
+                        <span style={{ margin: '0 10px' }}>→</span>
+                        <span>最新: ¥{Math.round(comparison.current).toLocaleString()}</span>
+                        <span style={{ 
+                          marginLeft: '15px',
+                          fontWeight: 'bold',
+                          color: comparison.difference >= 0 ? '#28a745' : '#dc3545'
+                        }}>
+                          差分: {comparison.difference >= 0 ? '+' : ''}¥{Math.round(comparison.difference).toLocaleString()}
+                          ({comparison.percentageChange >= 0 ? '+' : ''}{comparison.percentageChange.toFixed(1)}%)
+                          {comparison.difference >= 0 ? ' ↑' : ' ↓'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                
+                {/* 月別比較 */}
+                {personalMonthlyComparisons.length > 0 && (
+                  <div style={{ marginTop: '25px' }}>
+                    <h3 style={{ fontSize: '18px', marginBottom: '15px', color: '#333' }}>月別比較</h3>
+                    {personalMonthlyComparisons.map((monthlyComp, index) => (
+                      <div key={index} style={{ 
+                        marginBottom: '10px',
+                        backgroundColor: 'white',
+                        borderRadius: '6px',
+                        border: '1px solid #dee2e6',
+                        overflow: 'hidden'
+                      }}>
+                        <div 
+                          style={{ 
+                            padding: '15px',
+                            cursor: 'pointer',
+                            borderBottom: expandedMonths.has(`personal-${monthlyComp.month}`) ? '1px solid #dee2e6' : 'none',
+                            backgroundColor: '#fafafa'
+                          }}
+                          onClick={() => toggleMonthExpansion(`personal-${monthlyComp.month}`)}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h4 style={{ margin: 0, fontSize: '16px', color: '#333' }}>
+                              {monthlyComp.monthName}
+                            </h4>
+                            <span style={{ fontSize: '18px', transform: expandedMonths.has(`personal-${monthlyComp.month}`) ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                              ▼
+                            </span>
+                          </div>
+                          <div style={{ 
+                            display: 'flex', 
+                            alignItems: 'center',
+                            fontSize: '14px',
+                            marginTop: '8px'
+                          }}>
+                            <span>前回: ¥{Math.round(monthlyComp.previous).toLocaleString()}</span>
+                            <span style={{ margin: '0 10px' }}>→</span>
+                            <span>最新: ¥{Math.round(monthlyComp.current).toLocaleString()}</span>
+                            <span style={{ 
+                              marginLeft: '15px',
+                              fontWeight: 'bold',
+                              color: monthlyComp.difference >= 0 ? '#28a745' : '#dc3545'
+                            }}>
+                              差分: {monthlyComp.difference >= 0 ? '+' : ''}¥{Math.round(monthlyComp.difference).toLocaleString()}
+                              ({monthlyComp.percentageChange >= 0 ? '+' : ''}{monthlyComp.percentageChange.toFixed(1)}%)
+                              {monthlyComp.difference >= 0 ? ' ↑' : ' ↓'}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        {/* 月別詳細（差分要因） */}
+                        {expandedMonths.has(`personal-${monthlyComp.month}`) && monthlyComp.details.length > 0 && (
+                          <div style={{ padding: '15px', backgroundColor: 'white' }}>
+                            <h5 style={{ margin: '0 0 15px 0', fontSize: '14px', color: '#666' }}>差分要因詳細</h5>
+                            {['new', 'increased', 'decreased', 'removed'].map(changeType => {
+                              const typeDetails = monthlyComp.details.filter(d => d.changeType === changeType);
+                              if (typeDetails.length === 0) return null;
+                              
+                              const typeLabels = {
+                                new: '新規追加案件',
+                                increased: '金額増加案件',
+                                decreased: '金額減少案件',
+                                removed: '削除案件'
+                              };
+                              
+                              const typeColors = {
+                                new: '#28a745',
+                                increased: '#17a2b8',
+                                decreased: '#ffc107',
+                                removed: '#dc3545'
+                              };
+                              
+                              return (
+                                <div key={changeType} style={{ marginBottom: '15px' }}>
+                                  <div style={{ 
+                                    fontSize: '13px', 
+                                    fontWeight: 'bold', 
+                                    color: typeColors[changeType as keyof typeof typeColors],
+                                    marginBottom: '8px'
+                                  }}>
+                                    {typeLabels[changeType as keyof typeof typeLabels]} ({typeDetails.length}件)
+                                  </div>
+                                  <div style={{ paddingLeft: '15px' }}>
+                                    {typeDetails.slice(0, 5).map((detail, detailIndex) => (
+                                      <div key={detailIndex} style={{ 
+                                        fontSize: '12px', 
+                                        marginBottom: '4px',
+                                        color: '#555'
+                                      }}>
+                                        • {detail.clientName} - {detail.projectName}: 
+                                        {changeType === 'new' ? (
+                                          <span style={{ color: '#28a745', fontWeight: 'bold' }}>
+                                            +¥{Math.round(detail.currentAmount).toLocaleString()}
+                                          </span>
+                                        ) : changeType === 'removed' ? (
+                                          <span style={{ color: '#dc3545', fontWeight: 'bold' }}>
+                                            -¥{Math.round(detail.previousAmount).toLocaleString()}
+                                          </span>
+                                        ) : (
+                                          <>
+                                            ¥{Math.round(detail.previousAmount).toLocaleString()} → 
+                                            ¥{Math.round(detail.currentAmount).toLocaleString()} (
+                                            <span style={{ 
+                                              color: detail.difference >= 0 ? '#28a745' : '#dc3545',
+                                              fontWeight: 'bold'
+                                            }}>
+                                              {detail.difference >= 0 ? '+' : ''}¥{Math.round(detail.difference).toLocaleString()}
+                                            </span>)
+                                          </>
+                                        )}
+                                      </div>
+                                    ))}
+                                    {typeDetails.length > 5 && (
+                                      <div style={{ fontSize: '12px', color: '#999', fontStyle: 'italic' }}>
+                                        ... 他{typeDetails.length - 5}件
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {personalPerformanceComparisons[0] && (
+                  <div style={{ 
+                    marginTop: '15px', 
+                    paddingTop: '15px',
+                    borderTop: '1px solid #dee2e6',
+                    fontSize: '12px',
+                    color: '#6c757d'
+                  }}>
+                    <div>※ 前回インポート: {personalPerformanceComparisons[0].lastImportDate ? 
+                      new Date(personalPerformanceComparisons[0].lastImportDate).toLocaleString('ja-JP') : '-'}</div>
+                    <div>※ 最新インポート: {personalPerformanceComparisons[0].currentImportDate ? 
+                      new Date(personalPerformanceComparisons[0].currentImportDate).toLocaleString('ja-JP') : '-'}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           
           {/* 個人用週次フリーライティングスペース */}
           {selectedUser && (

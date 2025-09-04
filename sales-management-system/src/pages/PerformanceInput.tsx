@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { createPerformance, getOrders, updateOrder, getUsers, deleteAllPerformance, getPerformance } from '../services/firestore';
+import { createPerformance, getOrders, updateOrder, getUsers, deleteAllPerformance, getPerformance, savePerformanceHistory } from '../services/firestore';
 import type { Performance, User } from '../types';
 
 const PerformanceInput = () => {
@@ -129,6 +129,14 @@ const PerformanceInput = () => {
       console.log(`処理開始: ${records.length}件のレコードを処理します`);
       console.log('登録済み担当者:', users.map(u => u.name));
       
+      // 履歴保存: 削除前の現在のデータを'previous'として保存
+      const currentData = await getPerformance();
+      if (currentData.length > 0) {
+        console.log('現在のデータを履歴として保存中...');
+        await savePerformanceHistory(currentData, 'previous');
+        console.log('履歴保存完了');
+      }
+      
       // 既存のPerformanceデータを全削除
       console.log('既存の実績データを全削除中...');
       deletedCount = await deleteAllPerformance();
@@ -246,6 +254,15 @@ const PerformanceInput = () => {
       }
       
       console.log(`処理完了: 既存データ削除 ${deletedCount}件, 新規作成 ${successCount}件, 失敗 ${failedCount}件`);
+      
+      // 履歴保存: 新しいデータを'current'として保存
+      const newData = await getPerformance();
+      if (newData.length > 0) {
+        console.log('新しいデータを履歴として保存中...');
+        await savePerformanceHistory(newData, 'current');
+        console.log('新しいデータの履歴保存完了');
+      }
+      
       setImportResult({ 
         success: successCount, 
         failed: failedCount,

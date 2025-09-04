@@ -109,3 +109,39 @@ export interface Alert {
   lastDate: Date;
   dismissed: boolean;
 }
+
+export interface PerformanceComparison {
+  period: string; // 下期/Q3/Q4
+  previous: number; // 前回CSVインポート時の合計
+  current: number; // 最新CSVインポート時の合計
+  difference: number; // 差分
+  percentageChange: number; // 変化率
+  lastImportDate?: Date; // 前回インポート日時
+  currentImportDate?: Date; // 最新インポート日時
+}
+
+export interface PerformanceImportHistory {
+  id: string;
+  importDate: Date;
+  importType: 'current' | 'previous'; // 最新か前回か
+  dataSnapshot: Performance[]; // その時点の全実績データ
+}
+
+export interface MonthlyPerformanceComparison {
+  month: string; // '2025-07', '2025-08' etc.
+  monthName: string; // '7月', '8月' etc.
+  previous: number;
+  current: number;
+  difference: number;
+  percentageChange: number;
+  details: MonthlyComparisonDetail[]; // 差分要因詳細
+}
+
+export interface MonthlyComparisonDetail {
+  clientName: string;
+  projectName: string;
+  previousAmount: number;
+  currentAmount: number;
+  difference: number;
+  changeType: 'new' | 'increased' | 'decreased' | 'removed';
+}
